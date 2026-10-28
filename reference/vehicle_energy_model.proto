@@ -1,0 +1,132 @@
+// Android Auto vehicle energy model (SensorBatch field 23), recovered from Google Maps 26.43.00
+// (com.google.android.apps.maps 1068844608) protobuf-lite descriptors with reference/lite_schema.py.
+//
+// Field numbers and wire types are exact (from the RawMessageInfo of the obfuscated classes, named in
+// the trailing comments). Field NAMES are ours: protobuf-lite strips them, and Maps only reads
+// current_energy and capacity on the phone. The rest goes to Google's servers unchanged
+// (gfz.q() copies cdim -> cbjh 1:1, no unit conversion). Confidence for each name is in ENERGY-MODEL.md.
+syntax = "proto2";
+
+package vem;
+
+// Scalar with a second float. Maps' own demo models set value_float = 0 next to an int value.
+message Quantity {                 // cdhx -> cbiu
+  optional int32 value = 1;
+  optional float value_float = 2;
+}
+
+message FloatQuantity {            // cdhm -> cbit
+  optional float value = 1;
+  optional float value2 = 2;       // never set by Maps or the Ford sample
+}
+
+message XY {                       // cdhy -> cbiv
+  optional sint32 x = 1;           // ZIGZAG: raw varint 7816 = 3908
+  optional Quantity y = 2;
+}
+
+message VehicleEnergyModel {       // cdim (AA wire) -> cbjh (Maps internal)
+  optional Battery battery = 1;                  // -> cbjh.1
+  optional RoadLoad road_load = 2;               // -> cbjh.2
+  optional DrivetrainLoss drivetrain_loss = 3;   // -> cbjh.10
+  optional ChargePowerLimits charge_limits = 4;  // -> cbjh.4
+  optional BatteryLoss battery_loss = 5;         // -> cbjh.11
+  repeated Unknown6 unknown6 = 6;                // -> cbjh.6
+  repeated AuxPower aux_power = 7;               // -> cbjh.7
+  optional ChargeTimeTables charge_time = 8;     // -> cbjh.8
+  optional Unknown9 unknown9 = 9;                // -> cbjh.9
+  optional Unknown10 unknown10 = 10;             // -> cbjh.13
+  // cbjh.12 (cbiy: source info) is added by Maps itself, not sent by the HU.
+}
+
+message Battery {                  // cdio -> cbjj
+  optional Quantity reserve_energy_wh = 2;   // cbjj.i: 2.4-3.8% of capacity in every sample
+  optional Quantity current_energy_wh = 3;   // cbjj.d: MUST be > 0 or Maps ignores the model
+  optional Quantity capacity_wh = 4;         // cbjj.e: 100% point for the battery % display
+  optional int32 enum5 = 5;                  // cbjj.f: 3 values (0,1,2), names stripped
+  optional float air_density = 6;            // cbjj.g: kg/m^3 (Ford 1.293)
+  optional float outside_temp_c = 7;         // cbjj.h
+  optional float float8 = 8;                 // cbjj.m
+  optional uint32 power9_w = 9;              // cbjj.j: Maps demos 170000 / 240000
+  optional uint32 power10_w = 10;            // cbjj.k: Maps demos 155000 / 150000
+  optional bool bool11 = 11;                 // cbjj.l
+  repeated EnumValue enum_values12 = 12;     // cbjj.n
+}
+
+message EnumValue {                // cdin -> cbji
+  optional int32 kind = 1;         // 5 values (0..4), names stripped
+  optional uint32 value = 2;
+}
+
+// F(v) = A + B*v + C*v^2. Maps re-routes when A changes >= 50, B >= 5, C >= 0.05.
+message RoadLoad {                 // cdie -> cbjc
+  optional FloatQuantity a_n = 1;          // N
+  optional FloatQuantity b_n_per_mps = 2;  // N/(m/s)
+  optional FloatQuantity c_n_per_mps2 = 3; // N/(m/s)^2
+}
+
+message DrivetrainLoss {           // cdhj -> cbik
+  repeated SpeedRow rows = 7;      // x = power at the wheels (W), y = loss (W)
+  optional uint32 uint8 = 8;
+}
+message SpeedRow {                 // cdhz -> cbiw
+  optional float speed_mps = 1;
+  repeated XY points = 2;
+}
+
+message ChargePowerLimits {        // cdib -> cbix
+  repeated EnergyPower max_charge_power = 1;  // energy Wh -> W
+  repeated EnergyPower table2 = 2;            // same shape, unused by Ford
+}
+message EnergyPower {              // cdic / cdid -> cbja / cbjb
+  optional int32 energy_wh = 1;
+  optional uint32 power_w = 2;
+}
+
+message BatteryLoss {              // cdgt -> cbib
+  repeated XY points = 4;          // x = battery power (W), y = loss (W); Ford is I^2*R, R ~ 0.03 ohm @ 400 V
+}
+
+message Unknown6 {                 // cdhi -> cbij. Maps re-routes when [0].a changes >= 600 or [0].b >= 500
+  optional int32 a = 1;
+  optional Quantity b = 3;
+}
+
+message AuxPower {                 // cdhh -> cbii
+  optional float outside_temp_c = 1;
+  optional Quantity power2_w = 2;
+  optional Quantity power3_w = 3;
+  optional Quantity power4_w = 4;  // the only one Ford fills
+}
+
+message ChargeTimeTables {         // cdhd -> cbif
+  repeated ChargeCurve by_charger_power = 1;
+  repeated ChargeCurvesAtTemp by_temp = 2;   // same tables keyed by a float, probably temperature
+}
+message ChargeCurve {              // cdhb -> cbid
+  optional int32 charger_power_w = 1;
+  repeated EnergyTime points = 2;
+}
+message EnergyTime {               // cdha -> cbic
+  optional int32 energy_wh = 1;
+  optional int32 seconds = 2;
+}
+message ChargeCurvesAtTemp {       // cdhc -> cbie
+  optional float temp_c = 1;
+  repeated ChargeCurve curves = 2;
+}
+
+message Unknown9 {                 // cdhf -> cbig
+  optional int32 a = 1;
+  optional Quantity b = 2;
+}
+
+message Unknown10 {                // cdgx -> cbjg. Maps re-routes when field 2 changes >= 500
+  repeated UF list1 = 1;
+  optional uint32 u2 = 2;
+  repeated FU list3 = 3;
+  optional uint32 u4 = 4;
+  repeated UF list5 = 5;
+}
+message UF { optional uint32 u = 1; optional float f = 2; }   // cdgw / cdgv
+message FU { optional float f = 1; optional uint32 u = 2; }   // cdgu

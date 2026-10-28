@@ -1,0 +1,13 @@
+[nemesis]
+version=1.0
+id=aa.ev.model
+name=AA EV energy model (Ioniq 5 prototype)
+types=application
+preinstall=scripts/pre.sh
+postinstall=scripts/post.sh
+preuninstall=scripts/preun.sh
+
+[app.0]
+kind=sh
+path=bin/status.sh
+uid=root

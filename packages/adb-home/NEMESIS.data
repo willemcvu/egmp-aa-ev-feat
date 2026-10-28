@@ -1,0 +1,19 @@
+[nemesis]
+version=1.0
+id=adb.home
+name=ADB on home Wi-Fi
+types=application,service
+postinstall=scripts/post.sh
+preuninstall=scripts/preun.sh
+
+[app.0]
+kind=sh
+path=bin/status.sh
+uid=root
+
+[service.0]
+name=adbd-home
+kind=sh
+path=svc/adbd-home.sh
+uid=root
+mode=restart

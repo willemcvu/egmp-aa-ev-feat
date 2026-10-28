@@ -1,0 +1,38 @@
+# Personal data, firmware pulls, captures, decompiled apps, backups
+private/
+
+# Reference data: third-party samples (Ford model blob), personal charge
+# history (locations, session IDs), rolldown spreadsheet.
+# Only the recovered schema and the generic decoders are published.
+reference/*
+!reference/vehicle_energy_model.proto
+!reference/pbdump.py
+!reference/lite_schema.py
+
+# Build output. dist/ and the package payload contain patched Hyundai/Google
+# binaries (GPM APK/dex, libautoreceiver_infobank.so); never publish them.
+build/
+dist/
+gpm-ev/build/
+packages/*/files/
+*.apk
+*.dex
+*.odex
+*.so
+*.zip
+*.bin
+
+# Local overrides
+*.local
+
+# Python / editors / OS
+__pycache__/
+*.pyc
+.venv/
+venv/
+.~lock.*#
+*~
+*.swp
+.DS_Store
+.idea/
+.vscode/
