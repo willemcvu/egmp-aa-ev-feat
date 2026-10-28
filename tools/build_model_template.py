@@ -2,7 +2,7 @@
 """Build the EV energy-model template for the GPM sender (prototype stage).
 
 Starts from the Ford sample (reference/ford_ev_model.bin, a canonical protobuf
-per ENERGY-MODEL.md) and:
+per docs/ENERGY-MODEL.md) and:
 
   * battery.capacity_wh (1.4)        := 77400  (Ioniq 5 LR, 2022 US)
   * battery.reserve_energy_wh (1.2)  := 2400   (~3% of capacity)

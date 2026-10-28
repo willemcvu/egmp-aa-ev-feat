@@ -42,8 +42,8 @@ Local, gitignored inputs: `private/car-current-leafia105/` (the live GPM APK/ode
 
 1. `adb connect <car-ip>:5555` (adb.home, home Wi-Fi), `adb push dist/aa.ev.model.zip /data/local/tmp/`
 2. `adb shell /system/xbin/nemesis install /data/local/tmp/aa.ev.model.zip`
-3. Check `/data/nemesis/aa.ev.model.log` (`nemesis root -c 'cat …'`): expect `preinstall ok`, `OK: … replaced` ×2, `done. Reboot…`. Payload lib md5 on the unit: `37cbe6bfe7462444ca1f6d88013383d9`.
-4. Reboot the HU.
+3. The head unit reboots by itself when the install succeeds (ADB drops). After it's back, check `/data/nemesis/aa.ev.model.log` (`nemesis root -c 'cat …'`): expect `rebuilt payloads …`, `preinstall ok`, `OK: … replaced` ×2, `done - rebooting`. Payload lib md5 on the unit: `37cbe6bfe7462444ca1f6d88013383d9`.
+4. A refused install changes nothing and doesn't reboot; the log says why.
 5. Phone **Bluetooth off** (§5b trap), `adb logcat | grep -E "EvModelSender|SensorSource"` streaming **before** plugging in, then wired AA.
 6. Success: `EvModelSender: started`, then `energy model sent: <N> Wh, rc=0` every 5 s, no SensorSource parse failure; Maps shows EV routing with battery % tracking the cluster SOC. Note: rc=0 also means "endpoint not open" per §5d's send-path notes, so Maps' EV UI is the real proof.
 7. Off switch: `setprop persist.gpm.ev.off 1`, replug AA (persists across reboot; `0` to re-enable). Uninstall: `nemesis uninstall aa.ev.model` — restores Leafia files byte for byte (sandbox-tested), then reboot.

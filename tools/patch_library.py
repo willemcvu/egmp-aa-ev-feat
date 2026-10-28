@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Patch libautoreceiver_infobank.so for Android Auto EV features.
 
-Applies the three instruction patches designed in RESEARCH.md section 5d on top
+Applies the three instruction patches designed in docs/RESEARCH.md section 5d on top
 of Leafia v1.0.5's patched library (md5 c08410a8d32a615b1aa805cd8a243d52):
 
   1. SensorType_IsValid (0x144ec2): cmp r0,#20 -> cmp r0,#22

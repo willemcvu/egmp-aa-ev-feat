@@ -4,7 +4,7 @@
 // Field numbers and wire types are exact (from the RawMessageInfo of the obfuscated classes, named in
 // the trailing comments). Field NAMES are ours: protobuf-lite strips them, and Maps only reads
 // current_energy and capacity on the phone. The rest goes to Google's servers unchanged
-// (gfz.q() copies cdim -> cbjh 1:1, no unit conversion). Confidence for each name is in ENERGY-MODEL.md.
+// (gfz.q() copies cdim -> cbjh 1:1, no unit conversion). Confidence for each name is in docs/ENERGY-MODEL.md.
 syntax = "proto2";
 
 package vem;

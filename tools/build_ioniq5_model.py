@@ -2,7 +2,7 @@
 """Generate the Ioniq 5 vehicle energy model (SensorBatch field 23 payload).
 
 Replaces the Ford-derived prototype template with Ioniq 5 values per
-ENERGY-MODEL.md:
+docs/ENERGY-MODEL.md:
 
   block 1   battery: 77.4 kWh LR pack, ~3% reserve, live energy patched in
             at runtime (fixed-width 5-byte varint, see placeholder below)
@@ -111,7 +111,7 @@ BL_POWERS_W = list(range(0, 200001, 25000))
 
 # Single warm-pack model: for road-trip planning the car preconditions on the
 # way to a charger, so the ideal-temp curve is the realistic one. Measured
-# cold-pack caps (not shipped; see ENERGY-MODEL.md "field findings"):
+# cold-pack caps (not shipped; see docs/ENERGY-MODEL.md "field findings"):
 # <20C ~160 kW, <15C ~120 kW, <10C ~90 kW.
 
 # Aux/HVAC power vs outside temp (Q4). Calibrated against the car's live
