@@ -72,7 +72,7 @@ Write it as protobuf text (`vem.VehicleEnergyModel`), then `protoc --encode=vem.
 | `3.7` loss map | not in rolldown. Scale Ford's map, or build one from an efficiency estimate. Remember x is **sint32** |
 | `4.1` | E-GMP 800 V curve, calibrated on 233 real EA sessions: ~230–235 kW (3C) to 50%, thermal step-down to 160 kW at 53% held to 80%, 150 kW after the pause, then 60/35/22/15 kW at 90/95/98/100%. Thermal pause lives in the 8.1 tables, not here. (Cold-pack caps measured but not shipped — see "field findings") |
 | `5.4` | I²R: loss = R·(P/V)². Use the pack's DC resistance and ~650–700 V nominal. R is unmeasured; estimate it from the cell count and cell resistance, or from the voltage sag under load |
-| `7` aux power (Q4) | logged HVAC/aux draw, or published winter/summer consumption |
+| `7` aux power (Q4) | driving heater/A-C power vs outside temp; cold part calibrated with road load A (see "Cold weather") |
 | `8.1` | integrated from 4.1 (×η=0.95 charger→battery) + AC limits (10.9 kW onboard, 1.44 kW L1); 13 charger rows (350/260/250/240/200/175/150/125/100/50/25 kW DC, 10.9/1.44 kW AC); +300 s thermal pause at ~81% on ≥200 kW rows. **250 kW = Tesla Supercharger**: US Superchargers are all listed at exactly 250 kW and run at ~500 V, so the 800 V pack charges via the boost converter at a flat 105 kW to 90% (owner-measured, no step-down or pause), then the normal taper. Maps keys these tables by charger power only, so the voltage limit has to live in that row; 260/240 kW rows bracket it so other stations near 250 kW stay on the 800 V profile |
 | leave out | `1.5`, `1.8`–`1.12`, 6, 9, 10 (Ford works without them) |
 
@@ -99,6 +99,20 @@ The units really are m/s. Fitting the data as m/s gives CdA ≈ 0.82 m² and Crr
 
 ### Aux / HVAC (block 7)
 250 / 500 / 1500 W are realistic for mild / typical / about 10 °F. As a starting `7[]` table (Q4 = W): about 1500 W at −12 °C, ramping to about 250 W at 18–24 °C, then back up to about 500–800 W at 35–45 °C for A/C. Ford's Q4 values are much larger (2.6–5.4 kW), so we don't know yet whether Q4 is only HVAC/accessories. Test on the car and compare predicted vs real consumption.
+
+### Cold weather (blocks 2 and 7, live outside temp)
+The warm model (rolldown road load, ~400 W aux) gave ~293 Wh/mi for a 240 mi Burlington VT → Syracuse NY trip at 26 °F, so Maps planned 100 → 9 % with no stop. Owner anchors (highway, trip computer):
+
+| Outside | Speed | Real | Warm model |
+|---|---|---|---|
+| −12 °F (−24.4 °C) | 60 mph | ~1.6 mi/kWh (625 Wh/mi) | 285 Wh/mi without heat |
+| 20 °F (−6.7 °C) | 65 mph | ~2.3 mi/kWh (435 Wh/mi) | 314 Wh/mi without heat |
+
+All of that gap as heater power (block 7, time-based) would be ~20 kW at −24 °C and absurd at city speeds, so it's split:
+- **Block 7 (time-based)**: driving heater power, assumed 3.0 kW at −6.7 °C and 6.5 kW at −24.4 °C, 500 W at 10 °C, ~400 W electronics floor when mild, A/C above 24 °C. Maps looks it up server-side by `1.7`, which the sender patches from the live outside temp.
+- **Road load A (distance-based)**: cold tyres, denser air, drivetrain and battery losses. `COLD_DELTA_A` is solved so the anchors come out exact: +156 N at −6.7 °C, +483 N at −24.4 °C, 0 at 10 °C and above, linear between, clamped at −35 °C (+679 N). `EvModelSender` patches A (float at `ROAD_A_OFFSET`) from the live outside temp, with 3 °C hysteresis because Maps re-routes when A moves ≥ 50 N. Unknown temp keeps the last value, or the warm A.
+
+Result at 26 °F: ~2.6–2.75 mi/kWh at 55–60 mph (was ~3.4), so that trip now needs ~90 kWh and gets a charging stop. Mild weather is unchanged (3.1 mi/kWh at 65 mph, 50–70 °F). The heater split is an assumption; more cold trips (mi/kWh, average speed, climate share from the energy screen) at different temperatures would pin it down. The raw DATC outside-temp scaling is unconfirmed: the sender ignores values outside −45…55 °C, and the log line's `out=` should match the dash.
 
 ### Drivetrain efficiency (blocks 3 and 5)
 The sheet uses a flat 0.9, battery to wheel. In the Maps model that's split between block 3 (drivetrain loss vs speed and wheel power) and block 5 (battery I²R). Don't put 10% in both. Suggested start: block 3 ≈ 7–8% of wheel power plus a few hundred W of fixed spin/inverter loss that grows with speed (Ford's map has 450 W at 0 m/s rising to 2.7 kW at 36 m/s, with zero wheel power), and block 5 with R ≈ 0.1 Ω at ~650 V. Both should then be calibrated so the total matches about 0.9 at highway load.
@@ -142,7 +156,7 @@ Explored and parked:
 ## Next steps
 1. ~~Recover the real schema from Google Maps~~ (done, see above).
 2. ~~Write the generator~~ (done: `tools/build_ioniq5_model.py`; shipped values below are its constants, verified accepted by Maps on the car 2026-10-28).
-3. Test on the car: ~~does Maps accept the model~~ (yes). Charge tables calibrated against 233 real EA sessions (`tools/analyze_charge_history.py`, `reference/charge_history*.csv`): mean err −1.0 min, MAE 3.1 min. Exact-start spot pulls (EA app) validated: `CHARGE_ETA=0.95` (warm sessions imply 0.944–0.958; EA energy is charger-side, battery gets ~5% less), top taper 35/22/15 kW at 95/98/100% (a 95→100% session: 10.4 min actual vs 10.2 model), thermal pause +300 s at 62% on ≥200 kW chargers (a 54→99% session: 30.6 min actual vs 30.4 model). Usable capacity ≈ 77.4 kWh when new (2022 sessions) — Hyundai's figure is usable, not gross; runtime SOH probe handles degradation. Remaining variance: pack not-quite-preconditioned sessions (preconditioning state matters, not season). Do range and arrival-SOC predictions match real drives? Then tune blocks 3 and 7.
+3. Test on the car: ~~does Maps accept the model~~ (yes). Charge tables calibrated against 233 real EA sessions (`tools/analyze_charge_history.py`, `reference/charge_history*.csv`): mean err −1.0 min, MAE 3.1 min. Exact-start spot pulls (EA app) validated: `CHARGE_ETA=0.95` (warm sessions imply 0.944–0.958; EA energy is charger-side, battery gets ~5% less), top taper 35/22/15 kW at 95/98/100% (a 95→100% session: 10.4 min actual vs 10.2 model), thermal pause +300 s at ~81% on ≥200 kW chargers (a 54→99% session: 30.6 min actual vs 30.4 model). Usable capacity ≈ 77.4 kWh when new (2022 sessions) — Hyundai's figure is usable, not gross; runtime SOH probe handles degradation. Remaining variance: pack not-quite-preconditioned sessions (preconditioning state matters, not season). Do range and arrival-SOC predictions match real drives? Then tune blocks 3 and 7.
 4. Optional, to pin down the unknown fields: capture a model from a real AAOS/OEM car (e.g. a `content://google_maps_energy/model` dump), or A/B test `1.9`/`1.10` by watching how Maps' charging-stop durations change.
 
 ## Sources

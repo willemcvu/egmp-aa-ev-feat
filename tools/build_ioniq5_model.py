@@ -13,8 +13,11 @@ docs/ENERGY-MODEL.md:
   block 4   max DC charge power vs energy: E-GMP 800 V curve, ~235 kW peak,
             tapering to ~25 kW at 100%
   block 5   battery internal loss: I^2R with R = 0.1 ohm at 650 V
+  block 2   + cold: road load A raised at runtime from the live outside temp
+            (COLD_DELTA_A, patched by EvModelSender)
   block 7   aux/HVAC power vs outside temp (Q4 only, like the Ford sample):
-            1500 W at -12 C, 250 W mild, 800 W at 45 C
+            driving heater 3.0 kW at -6.7 C, 6.5 kW at -24.4 C, 400 W mild,
+            950 W at 45 C
   block 8   charge-time tables per charger power, integrated from block 4
             with AC limits (10.9 kW onboard, 1.44 kW L1); the 250 kW row is
             Tesla Supercharger (500 V, boost-limited flat 105 kW to 90%)
@@ -31,6 +34,7 @@ Outputs:
   gpm-ev/src/com/google/android/projection/protocol/EvModelTemplate.java
 """
 
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -115,13 +119,30 @@ BL_POWERS_W = list(range(0, 200001, 25000))
 # cold-pack caps (not shipped; see docs/ENERGY-MODEL.md "field findings"):
 # <20C ~160 kW, <15C ~120 kW, <10C ~90 kW.
 
-# Aux/HVAC power vs outside temp (Q4). Calibrated against the car's live
-# "climate" + "electronics" readouts: ~850 W total at -3 C, ~350-400 W
-# electronics floor at mild temps.
+# Cold weather. Owner anchors (highway, trip computer):
+#   -12 F (-24.4 C) at 60 mph: ~1.6 mi/kWh (625 Wh/mi)
+#    20 F ( -6.7 C) at 65 mph: ~2.3 mi/kWh (435 Wh/mi)
+# The warm model gives ~285-315 Wh/mi there. The gap is split between a
+# time-based part (cabin + pack heating while driving, the aux table below,
+# looked up server-side by the live outside temp in 1.7) and a distance-based
+# part (cold tyres, denser air, drivetrain/battery losses) carried as extra
+# road load A, which EvModelSender patches from the live outside temp. All
+# heater power would mean ~20 kW at -24 C and absurd numbers at city speeds.
+# Heater anchors are assumptions (3.0 kW at -6.7 C, 6.5 kW at -24.4 C);
+# COLD_DELTA_A is then solved so the anchors come out exact
+# (see docs/ENERGY-MODEL.md "Cold weather").
+COLD_DELTA_A = [  # (outside temp C, extra road load A in N), linear between
+    (10.0, 0.0), (-6.7, 156.0), (-24.4, 483.0), (-35.0, 679.0),
+]
+
+# Aux/HVAC power vs outside temp (Q4), driving: electronics ~400 W floor at
+# mild temps (the car's live readouts), A/C above 24 C, heater below 10 C
+# rising to the cold anchors above.
 AUX_TABLE = [
-    (-20.0, 1800), (-12.0, 1400), (-5.0, 850), (5.0, 600), (12.0, 450),
-    (18.0, 400), (24.0, 400), (30.0, 550), (35.0, 700), (40.0, 850),
-    (45.0, 950),
+    (-35.0, 8600), (-30.0, 7600), (-24.4, 6500), (-20.0, 5630),
+    (-15.0, 4640), (-10.0, 3650), (-6.7, 3000), (-5.0, 2750), (0.0, 2000),
+    (5.0, 1250), (10.0, 500), (18.0, 400), (24.0, 400), (30.0, 550),
+    (35.0, 700), (40.0, 850), (45.0, 950),
 ]
 
 # Tesla Superchargers: in the US they're all listed at exactly 250 kW, and
@@ -327,6 +348,13 @@ def main() -> int:
     bf = parse_fields(model, batt.val_off, batt.val_off + batt.val_len)
     assert bf[7].wire == 5 and bf[7].val_len == 4
     temp_off_in_model = bf[7].val_off
+    # road_load.a_n.value (2.1.1, float) - cold road load patch point
+    rl = top[2]
+    rf = parse_fields(model, rl.val_off, rl.val_off + rl.val_len)
+    af = parse_fields(model, rf[1].val_off, rf[1].val_off + rf[1].val_len)
+    assert af[1].wire == 5 and af[1].val_len == 4
+    a_off_in_model = af[1].val_off
+    assert struct.unpack("<f", model[a_off_in_model:a_off_in_model + 4])[0] == ROAD_LOAD[0]
 
     batch = (
         b"\x80\x03"
@@ -338,8 +366,11 @@ def main() -> int:
     energy_off += hdr
     cap_off += hdr
     temp_off = temp_off_in_model + hdr
+    a_off = a_off_in_model + hdr
     print(f"model {len(model)} bytes, batch {len(batch)} bytes; offsets: "
-          f"energy@{energy_off} capacity@{cap_off} temp@{temp_off}")
+          f"energy@{energy_off} capacity@{cap_off} temp@{temp_off} roadA@{a_off}")
+    cold_t = ", ".join(f"{t}f" for t, _ in COLD_DELTA_A)
+    cold_a = ", ".join(f"{a}f" for _, a in COLD_DELTA_A)
 
     OUT_MODEL.write_bytes(bytes(model))
     OUT_BATCH.write_bytes(batch)
@@ -361,13 +392,19 @@ def main() -> int:
         "    static final int ENERGY_WIDTH = %d;\n"
         "    static final int ENERGY_PLACEHOLDER_WH = %d;\n"
         "    static final int TEMP_OFFSET = %d;  // outside_temp_c float bits\n"
+        "    static final int ROAD_A_OFFSET = %d;  // road_load.a_n float bits\n"
+        "    static final float ROAD_A_N = %rf;\n"
+        "    // extra road load A vs outside temp (C), linear between, clamped\n"
+        "    static final float[] COLD_TEMPS_C = {%s};\n"
+        "    static final float[] COLD_DELTA_A_N = {%s};\n"
         '    static final String TEMPLATE_B64 =\n'
         '        "%s"\n'
         "%s;\n\n"
         "    private EvModelTemplate() {}\n"
         "}\n"
         % (CAPACITY_WH, cap_off, CAPACITY_WIDTH, energy_off, ENERGY_WIDTH,
-           PLACEHOLDER_WH, temp_off, lines[0], concat)
+           PLACEHOLDER_WH, temp_off, a_off, ROAD_LOAD[0], cold_t, cold_a,
+           lines[0], concat)
     )
     print(f"wrote {OUT_TXT.relative_to(ROOT)}, {OUT_MODEL.relative_to(ROOT)}, "
           f"{OUT_BATCH.relative_to(ROOT)}, {OUT_JAVA.relative_to(ROOT)}")

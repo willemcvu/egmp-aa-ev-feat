@@ -23,7 +23,8 @@ import com.hkmc.cluster.NavigationClusterListener;
  * Live data sources:
  *  - DISPLAY_SOC via binder com.hkmc.micom.hev txn 3 (energy = SOC x capacity)
  *  - the nav battery packet via NavigationCluster.requestBatteryInfoReq():
- *    DATC_OUT_TEMP_SNSR patches model field 1.7 (aux/HVAC table lookup);
+ *    DATC_OUT_TEMP_SNSR patches model field 1.7 (aux/HVAC table lookup)
+ *    and road load A (cold penalty, EvModelTemplate.COLD_*);
  *    XEV_MIN_BATT_TEMP / EV_AVLBL_ENRG / VCU_DTE_* are logged for later
  *    calibration (cold-pack charge caps, remaining-energy units)
  *  - SOH probe via tm_hscan_service txn 0xd6 (capacity, gated by
@@ -61,6 +62,13 @@ public final class EvModelSender {
     private static final int IDX_DTE_ADD = 7;         // VCU_DTE_ADD
 
     private static final int MIN_ENERGY_WH = 500;  // Maps drops models with 0
+
+    // Outside temp sanity range (C); the raw DATC value's scaling is not
+    // confirmed, so anything outside this is treated as unknown.
+    private static final int OUT_TEMP_MIN_C = -45;
+    private static final int OUT_TEMP_MAX_C = 55;
+    private static final int COLD_HYST_C = 3;
+    private static int sColdTempC = Integer.MIN_VALUE;  // temp A is based on
 
     private static final Object LOCK = new Object();
     private static Thread sThread;
@@ -158,11 +166,14 @@ public final class EvModelSender {
                         writeFloatLe(msg, EvModelTemplate.TEMP_OFFSET,
                                 (float) outC);
                     }
+                    float roadA = coldRoadLoadA(outC);
+                    writeFloatLe(msg, EvModelTemplate.ROAD_A_OFFSET, roadA);
                     int rc = sSource.sendRawMessage(msg);
                     Log.i(TAG, "energy model sent: " + wh + " Wh of " + cap
                             + " Wh, rc=" + rc + ", pack=" + packTempStr()
                             + "C, out=" + (outC == Integer.MIN_VALUE ? "?" : outC)
-                            + "C, enrg=" + sAvlblEnrg
+                            + "C, A=" + Math.round(roadA)
+                            + "N, enrg=" + sAvlblEnrg
                             + ", dte=" + sDteBase + "+" + sDteAdd);
                 }
             }
@@ -238,7 +249,48 @@ public final class EvModelSender {
     }
 
     private static int outsideTempC() {
-        return navFresh() ? sOutsideTempC : Integer.MIN_VALUE;
+        if (!navFresh() || sOutsideTempC < OUT_TEMP_MIN_C
+                || sOutsideTempC > OUT_TEMP_MAX_C) {
+            return Integer.MIN_VALUE;
+        }
+        return sOutsideTempC;
+    }
+
+    // ---- cold road load ------------------------------------------------------
+
+    /**
+     * Road load A for the outside temperature: base A plus the cold penalty
+     * (EvModelTemplate.COLD_*, linear, clamped). The temperature it is based
+     * on only moves once the reading is COLD_HYST_C away, so a value
+     * wobbling around an edge doesn't keep changing A (Maps re-routes when A
+     * moves by >= 50 N). Unknown temperature keeps the last one used, or the
+     * warm base A if there is none yet.
+     */
+    private static float coldRoadLoadA(int outC) {
+        if (outC != Integer.MIN_VALUE && (sColdTempC == Integer.MIN_VALUE
+                || Math.abs(outC - sColdTempC) >= COLD_HYST_C)) {
+            sColdTempC = outC;
+        }
+        if (sColdTempC == Integer.MIN_VALUE) {
+            return EvModelTemplate.ROAD_A_N;
+        }
+        return EvModelTemplate.ROAD_A_N + coldDeltaA(sColdTempC);
+    }
+
+    /** Extra road load (N) at temp C; COLD_TEMPS_C runs warm to cold. */
+    private static float coldDeltaA(float t) {
+        float[] ts = EvModelTemplate.COLD_TEMPS_C;
+        float[] da = EvModelTemplate.COLD_DELTA_A_N;
+        if (t >= ts[0]) {
+            return da[0];
+        }
+        for (int i = 1; i < ts.length; i++) {
+            if (t >= ts[i]) {
+                return da[i - 1] + (da[i] - da[i - 1]) * (t - ts[i - 1])
+                        / (ts[i] - ts[i - 1]);
+            }
+        }
+        return da[da.length - 1];
     }
 
     // ---- energy/capacity ---------------------------------------------------
@@ -385,6 +437,13 @@ public final class EvModelSender {
                 EvModelTemplate.CAPACITY_WIDTH);
         for (int i = 0; i < capWant.length; i++) {
             if (sTemplate[EvModelTemplate.CAPACITY_OFFSET + i] != capWant[i]) {
+                return false;
+            }
+        }
+        byte[] aWant = new byte[4];
+        writeFloatLe(aWant, 0, EvModelTemplate.ROAD_A_N);
+        for (int i = 0; i < 4; i++) {
+            if (sTemplate[EvModelTemplate.ROAD_A_OFFSET + i] != aWant[i]) {
                 return false;
             }
         }
