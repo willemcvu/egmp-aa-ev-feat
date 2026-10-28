@@ -47,6 +47,7 @@ Runtime switches (via ADB, then replug Android Auto):
 | [docs/ENERGY-MODEL.md](docs/ENERGY-MODEL.md) | energy model schema, field meanings, Ioniq 5 values and calibration |
 | [docs/PRECONDITIONING.md](docs/PRECONDITIONING.md) | research: triggering battery preconditioning from Maps routes |
 | [docs/HANDOFF.md](docs/HANDOFF.md) | developer handoff: build, first car test, open questions |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | planned additions: auto preconditioning, drive logging, real capacity |
 
 ## Repository layout
 
