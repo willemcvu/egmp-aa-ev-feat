@@ -44,6 +44,14 @@ sys_ro
 apps_release
 clean_payload
 sync
-log "done. Reboot the head unit, then plug in Android Auto."
 log "off switch: setprop $OFF_PROP 1 (stock behaviour), back with setprop $OFF_PROP 0"
+
+# The running GPM keeps the old code mapped until it restarts: reboot, as
+# Leafia does.
+retire_usb_descriptor
+toast "AA EV model installed. Restarting now: remove the USB drive while it restarts."
+log "done - rebooting"
+sleep 3
+exec /system/bin/reboot
+log "FAIL: reboot returned - reboot the head unit by hand"
 exit 0

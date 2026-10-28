@@ -109,6 +109,25 @@ snapshot_is_base() {
     [ "$(file_md5 "$BACKUP_DIR/libautoreceiver_infobank.so")" = "$SUM_BASE_LIB" ]
 }
 
+# NEMESIS 1.15 force-updates an installed package from a USB drive left in at
+# boot, so with the reboot after install a drive left in would reinstall and
+# reboot forever. Rename our descriptor (as Leafia does) so the next boot
+# leaves it alone.
+retire_usb_descriptor() {
+    local _d
+    for _d in /storage/usb0 /storage/usb1 /storage/usb2 /mnt/media_rw/usb0 /mnt/media_rw/usb1 /mnt/media_rw/usb2; do
+        [ -f "$_d/NEMESIS.data" ] || continue
+        grep -q '^type=install' "$_d/NEMESIS.data" 2>/dev/null || continue
+        grep -q 'aa\.ev\.model\.zip' "$_d/NEMESIS.data" 2>/dev/null || continue
+        if mv "$_d/NEMESIS.data" "$_d/NEMESIS.data.installed" 2>/dev/null; then
+            log "renamed $_d/NEMESIS.data to NEMESIS.data.installed so the next boot does not reinstall"
+        else
+            log "WARN: could not rename $_d/NEMESIS.data - remove the USB drive before the head unit restarts"
+        fi
+    done
+    return 0
+}
+
 clean_payload() {
     case "$PAYLOAD" in
         */data/nemesis/build/aa.ev.model) rm -rf "$PAYLOAD"; rmdir "${PAYLOAD%/*}" 2>/dev/null ;;

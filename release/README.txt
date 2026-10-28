@@ -22,8 +22,11 @@ INSTALL
        README.txt
 2. Car on, head unit fully started, plug the drive into a USB data port.
 3. NEMESIS asks whether to run the item on the drive: tap Yes.
-4. Wait for the result, then reboot the head unit (pinhole button) and
-   remove the drive.
+4. Wait: after a few seconds it says it's installed and the head unit
+   restarts by itself. Remove the drive while it restarts. (It renames
+   NEMESIS.data on the drive to NEMESIS.data.installed so a drive left in
+   doesn't install again; rename it back to reinstall.) If it refuses, a
+   message says so, nothing is changed and it doesn't restart.
 5. Plug in Android Auto. In Google Maps, battery % shows on routes and long
    trips add charging stops.
 

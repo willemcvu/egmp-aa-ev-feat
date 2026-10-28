@@ -51,7 +51,7 @@ setup_sandbox() {
         mkdir -p "$S/data/nemesis/apps/aa.ev.model/$(dirname "$f")"
         case "$f" in
             ./files/*) cp "packages/aa-ev-model/$f" "$S/data/nemesis/apps/aa.ev.model/$f" ;;
-            *) sed "s|/system/|$S/system/|g; s|/data/|$S/data/|g; s|/cache/|$S/cache/|g" \
+            *) sed "s|/system/|$S/system/|g; s|/data/|$S/data/|g; s|/cache/|$S/cache/|g; s|/storage/|$S/storage/|g; s|/mnt/|$S/mnt/|g" \
                 "packages/aa-ev-model/$f" > "$S/data/nemesis/apps/aa.ev.model/$f" ;;
         esac
     done
@@ -87,8 +87,22 @@ EOF
 #!/bin/bash
 exit 0
 EOF
+    cat > "$S/system/bin/reboot" <<'EOF'
+#!/bin/bash
+# record the reboot instead of doing it
+echo reboot >> "$REBOOT_LOG"
+exit 0
+EOF
+    cat > "$S/system/bin/sleep" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
     chmod +x "$S/system/xbin/nemesis" "$S/data/nemesis/bin/md5" "$S/system/bin/pm" \
-             "$S/system/bin/getprop" "$S/system/bin/dexopt" "$S/system/bin/am"
+             "$S/system/bin/getprop" "$S/system/bin/dexopt" "$S/system/bin/am" \
+             "$S/system/bin/reboot" "$S/system/bin/sleep"
+    # a USB drive holding this release's descriptor
+    mkdir -p "$S/storage/usb0"
+    cp release/NEMESIS.data "$S/storage/usb0/NEMESIS.data"
 
     # The scripts reset PATH to car dirs; give them the host coreutils they use.
     local _t
@@ -101,7 +115,7 @@ run_script() {
     local S="$1" script="$2"
     # NEMESIS runs package hooks with cwd inside the (staging) package tree.
     ( cd "$S/data/nemesis/apps/aa.ev.model" && \
-        PM_LOG="$S/pm.log" \
+        PM_LOG="$S/pm.log" REBOOT_LOG="$S/reboot.log" \
         PATH="$S/system/xbin:$S/system/bin:$S/data/nemesis/bin:$PATH" \
         /bin/bash "scripts/$script" 2>&1 )
 }
@@ -140,6 +154,10 @@ check "snapshot has Leafia APK" $?
 check "snapshot has Leafia lib" $?
 pm_released "$S"
 check "post.sh leaves GPM enabled (apps_release on success)" $?
+[ "$(cat "$S/reboot.log" 2>/dev/null)" = reboot ]
+check "post.sh reboots once at the end" $?
+[ ! -f "$S/storage/usb0/NEMESIS.data" ] && [ -f "$S/storage/usb0/NEMESIS.data.installed" ]
+check "USB descriptor retired so a drive left in does not reinstall" $?
 
 echo "=== 2. uninstall restores byte for byte ==="
 run_script "$S" preun.sh > "$T/s1.preun.log" 2>&1
@@ -194,6 +212,8 @@ check "odex untouched" $?
 
 [ ! -d "$S/data/nemesis/build/aa.ev.model" ]
 check "no payload left behind after refusal" $?
+[ ! -f "$S/reboot.log" ]
+check "no reboot after a refused install" $?
 
 echo "=== 6. upgrade over an earlier build ==="
 S=$T/s6
