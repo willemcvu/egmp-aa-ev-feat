@@ -20,9 +20,13 @@ fi
 
 # Restore each snapshotted file only if the live file is still ours. If Leafia
 # was uninstalled in between, the live files are stock: leave them alone.
+# The GPM APK also counts as ours when our library is in place and the APK
+# isn't Leafia's: an earlier build of this package (its APK md5 differs).
 _rc=0
 _live_apk=$(file_md5 "$GPM_APK")
-if [ "$_live_apk" = "$SUM_PAY_APK" ]; then
+_live_lib=$(file_md5 "$LIB_LIVE")
+if [ "$_live_apk" = "$SUM_PAY_APK" ] ||
+   { [ "$_live_lib" = "$SUM_PAY_LIB" ] && [ "$_live_apk" != "$SUM_BASE_APK" ]; }; then
     if [ -s "$BACKUP_DIR/HKMC_GPM.apk" ] && [ -s "$BACKUP_DIR/HKMC_GPM.odex" ]; then
         put_lib "$BACKUP_DIR/HKMC_GPM.apk" "$GPM_APK" || _rc=1
         put_lib "$BACKUP_DIR/HKMC_GPM.odex" "$GPM_ODEX" || _rc=1
@@ -35,7 +39,6 @@ else
     log "live HKMC_GPM.apk is not this package's - leaving it alone"
 fi
 
-_live_lib=$(file_md5 "$LIB_LIVE")
 if [ "$_live_lib" = "$SUM_PAY_LIB" ]; then
     if [ -s "$BACKUP_DIR/libautoreceiver_infobank.so" ]; then
         put_lib "$BACKUP_DIR/libautoreceiver_infobank.so" "$LIB_LIVE" || _rc=1

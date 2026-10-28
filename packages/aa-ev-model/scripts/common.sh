@@ -1,13 +1,15 @@
 #!/system/bin/sh
 # aa.ev.model — advertise ELECTRIC + sensor 23 and send the energy model to AA.
 #
-# Payloads are prebuilt on the dev machine (tools/patch_library.py,
-# tools/patch_gpm_smali.py) and shipped in files/ with an MD5SUMS manifest.
+# The package ships no Hyundai/Google binaries. files/ holds lpatch deltas
+# (*.lpd) and lpatch itself; preinstall rebuilds the payloads into $PAYLOAD
+# from the unit's own Leafia v1.0.5 files (lpatch refuses any other source)
+# and checks them against files/MD5SUMS.
 # Install gates on the live files being exactly Leafia v1.0.5's files (or this
-# package's own payloads, for a reinstall), snapshots them, and swaps in the
-# payloads. Uninstall restores the snapshot byte for byte, but only for files
-# that are still ours (if Leafia was uninstalled in between, its files are not
-# put back).
+# package's own, with a verified Leafia snapshot, for a reinstall/upgrade),
+# snapshots them, and swaps in the payloads. Uninstall restores the snapshot
+# byte for byte, but only for files that are still ours (if Leafia was
+# uninstalled in between, its files are not put back).
 #
 # Off switch without uninstall: setprop persist.gpm.ev.off 1 (and replug AA).
 
@@ -18,6 +20,7 @@ PKG_DIR=/data/nemesis/apps/aa.ev.model
 # preinstall runs from the staging dir before the tree exists at PKG_DIR;
 # pre.sh sets FILES=./files before sourcing this file.
 FILES=${FILES:-$PKG_DIR/files}
+PAYLOAD=/data/nemesis/build/aa.ev.model
 BACKUP_DIR=/data/nemesis/backup/aa.ev.model
 LOG=/data/nemesis/aa.ev.model.log
 HOLD_FILE=/data/nemesis/aa.ev.model.stopped
@@ -97,6 +100,43 @@ manifest_sum() {
 
 chown_system() {
     chown 0.0 "$1" 2>/dev/null || chown 0:0 "$1" 2>/dev/null || true
+}
+
+# the snapshot holds exactly Leafia v1.0.5's three files
+snapshot_is_base() {
+    [ "$(file_md5 "$BACKUP_DIR/HKMC_GPM.apk")" = "$SUM_BASE_APK" ] &&
+    [ "$(file_md5 "$BACKUP_DIR/HKMC_GPM.odex")" = "$SUM_BASE_ODEX" ] &&
+    [ "$(file_md5 "$BACKUP_DIR/libautoreceiver_infobank.so")" = "$SUM_BASE_LIB" ]
+}
+
+clean_payload() {
+    case "$PAYLOAD" in
+        */data/nemesis/build/aa.ev.model) rm -rf "$PAYLOAD"; rmdir "${PAYLOAD%/*}" 2>/dev/null ;;
+    esac
+    return 0
+}
+
+# build_payloads <Leafia apk> <Leafia lib>: rebuild our payloads into $PAYLOAD.
+# lpatch only writes a result when the source is the exact file the delta was
+# made from; the results must then match files/MD5SUMS.
+build_payloads() {
+    local _n _src
+    clean_payload
+    mkdir -p "$PAYLOAD" || { log "FAIL: mkdir $PAYLOAD"; return 1; }
+    chmod 755 "$FILES/lpatch" 2>/dev/null || true
+    for _n in HKMC_GPM.apk libautoreceiver_infobank.so; do
+        case "$_n" in
+            *.apk) _src="$1" ;;
+            *) _src="$2" ;;
+        esac
+        if ! "$FILES/lpatch" delta "$FILES/$_n.lpd" "$_src" "$PAYLOAD/$_n" >> "$LOG" 2>&1; then
+            log "FAIL: could not rebuild $_n from $_src"
+            return 1
+        fi
+        sum_is "$PAYLOAD/$_n" "$(manifest_sum "$_n")" || return 1
+    done
+    log "rebuilt payloads from $1 and $2"
+    return 0
 }
 
 # copy beside the target, then rename over it (new inode; a running app keeps

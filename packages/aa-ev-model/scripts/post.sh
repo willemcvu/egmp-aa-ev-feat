@@ -4,6 +4,10 @@
 log "postinstall aa.ev.model"
 trap '[ $? = 0 ] || { sys_ro; apps_release; }' EXIT
 
+# payloads rebuilt by preinstall: check them again before touching /system
+sum_is "$PAYLOAD/HKMC_GPM.apk" "$(manifest_sum HKMC_GPM.apk)" || exit 1
+sum_is "$PAYLOAD/libautoreceiver_infobank.so" "$(manifest_sum libautoreceiver_infobank.so)" || exit 1
+
 apps_hold
 snapshot_all || exit 1
 if ! sys_rw; then
@@ -11,7 +15,7 @@ if ! sys_rw; then
     exit 1
 fi
 
-if ! put_lib "$FILES/HKMC_GPM.apk" "$GPM_APK"; then
+if ! put_lib "$PAYLOAD/HKMC_GPM.apk" "$GPM_APK"; then
     log "FAIL: install $GPM_APK"
     exit 1
 fi
@@ -27,7 +31,7 @@ if ! write_odex "$GPM_APK" "$GPM_ODEX"; then
     log "dexopt failed for HKMC_GPM; boot will optimize"
 fi
 
-if ! put_lib "$FILES/libautoreceiver_infobank.so" "$LIB_LIVE"; then
+if ! put_lib "$PAYLOAD/libautoreceiver_infobank.so" "$LIB_LIVE"; then
     log "FAIL: install $LIB_LIVE"
     exit 1
 fi
@@ -38,6 +42,7 @@ prefill_dalvik "$GPM_ODEX"
 
 sys_ro
 apps_release
+clean_payload
 sync
 log "done. Reboot the head unit, then plug in Android Auto."
 log "off switch: setprop $OFF_PROP 1 (stock behaviour), back with setprop $OFF_PROP 0"

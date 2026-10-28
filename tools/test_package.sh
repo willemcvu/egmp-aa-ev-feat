@@ -10,6 +10,11 @@
 #   3. uninstall after Leafia was removed in between leaves stock files alone
 #   4. reinstall over our own payloads
 #   5. refusal on unknown live files
+#   6. upgrade over an earlier build of this package (different GPM APK)
+#   7. refusal when the Leafia snapshot is not intact
+#   8. the package carries only deltas, lpatch and the manifest
+#
+# files/lpatch is the real ARM binary; it runs here through qemu binfmt.
 #
 # Run from the repo root after packages/aa-ev-model/build.sh.
 
@@ -87,7 +92,7 @@ EOF
 
     # The scripts reset PATH to car dirs; give them the host coreutils they use.
     local _t
-    for _t in cp mv rm mkdir chmod chown cmp grep tail touch cat sync md5sum dirname; do
+    for _t in cp mv rm rmdir mkdir chmod chown cmp grep tail touch cat sync md5sum dirname; do
         ln -sf "$(command -v "$_t")" "$S/system/bin/$_t"
     done
 }
@@ -186,6 +191,48 @@ run_script "$S" pre.sh > "$T/s5.pre.log" 2>&1
 check "pre.sh refuses unknown APK" $?
 [ "$(md5_of "$S/system/app/HKMC_GPM.odex")" = "$SUM_BASE_ODEX" ]
 check "odex untouched" $?
+
+[ ! -d "$S/data/nemesis/build/aa.ev.model" ]
+check "no payload left behind after refusal" $?
+
+echo "=== 6. upgrade over an earlier build ==="
+S=$T/s6
+setup_sandbox "$S"
+run_script "$S" pre.sh > /dev/null 2>&1 && run_script "$S" post.sh > /dev/null 2>&1
+echo "EARLIER BUILD APK" > "$S/system/app/HKMC_GPM.apk"   # our lib stays in place
+run_script "$S" pre.sh > "$T/s6.pre.log" 2>&1
+check "pre.sh accepts an earlier build (rebuilds from the snapshot)" $?
+run_script "$S" post.sh > "$T/s6.post.log" 2>&1
+check "post.sh installs" $?
+[ "$(md5_of "$S/system/app/HKMC_GPM.apk")" = "$SUM_PAY_APK" ]
+check "live APK is the new payload" $?
+[ ! -d "$S/data/nemesis/build/aa.ev.model" ]
+check "payload build dir cleaned up" $?
+echo "EARLIER BUILD APK" > "$S/system/app/HKMC_GPM.apk"
+run_script "$S" preun.sh > "$T/s6.preun.log" 2>&1
+[ "$(md5_of "$S/system/app/HKMC_GPM.apk")" = "$SUM_BASE_APK" ]
+check "uninstall restores Leafia APK over an earlier build" $?
+[ "$(md5_of "$S/system/lib/libautoreceiver_infobank.so")" = "$SUM_BASE_LIB" ]
+check "uninstall restores Leafia lib" $?
+
+echo "=== 7. refusal when the snapshot is not Leafia's ==="
+S=$T/s7
+setup_sandbox "$S"
+run_script "$S" pre.sh > /dev/null 2>&1 && run_script "$S" post.sh > /dev/null 2>&1
+_before=$(md5_of "$S/system/app/HKMC_GPM.apk")
+echo "DAMAGED" > "$S/data/nemesis/backup/aa.ev.model/HKMC_GPM.odex"
+run_script "$S" pre.sh > "$T/s7.pre.log" 2>&1
+[ $? -ne 0 ]
+check "pre.sh refuses with a damaged snapshot" $?
+[ "$(md5_of "$S/system/app/HKMC_GPM.apk")" = "$_before" ]
+check "live APK untouched" $?
+
+echo "=== 8. package contents ==="
+[ "$(cd packages/aa-ev-model/files && LC_ALL=C ls | LC_ALL=C sort | tr '\n' ' ')" = \
+  "HKMC_GPM.apk.lpd MD5SUMS libautoreceiver_infobank.so.lpd lpatch " ]
+check "files/ holds only deltas, lpatch and MD5SUMS" $?
+! unzip -l dist/aa.ev.model.zip | grep -E '\.(apk|so|odex|dex)$' >/dev/null
+check "package zip has no APK/so/odex/dex" $?
 
 echo
 echo "passed: $pass, failed: $fail"
