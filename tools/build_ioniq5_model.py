@@ -16,7 +16,8 @@ docs/ENERGY-MODEL.md:
   block 7   aux/HVAC power vs outside temp (Q4 only, like the Ford sample):
             1500 W at -12 C, 250 W mild, 800 W at 45 C
   block 8   charge-time tables per charger power, integrated from block 4
-            with AC limits (10.9 kW onboard, 1.44 kW L1)
+            with AC limits (10.9 kW onboard, 1.44 kW L1); the 250 kW row is
+            Tesla Supercharger (500 V, boost-limited flat 105 kW to 90%)
   omitted   1.5, 1.8-1.12, 6, 9, 10 (the Ford sample works without them)
 
 Flow: generate protobuf text -> protoc --encode -> widen the current-energy
@@ -123,9 +124,20 @@ AUX_TABLE = [
     (45.0, 950),
 ]
 
+# Tesla Superchargers: in the US they're all listed at exactly 250 kW, and
+# little else is. They run at ~500 V, so the 800 V pack charges through the
+# car's boost converter: owner-measured flat 105 kW from 0 to 90%, no thermal
+# step-down or pause, then the normal taper. Maps keys the time tables by
+# charger power only (no voltage), so the 250 kW row carries this profile.
+SUPERCHARGER_W = 250000
+SUPERCHARGER_FLAT_W = 105000
+SUPERCHARGER_FLAT_TO_WH = 69660  # 90%
+
 # Charger powers for the time tables (DC + 10.9 kW AC + 1.44 kW L1).
-CHARGERS_W = [350000, 250000, 200000, 175000, 150000, 125000, 100000,
-              50000, 25000, 10900, 1440]
+# 260/240 kW are ordinary 800 V rows bracketing the Supercharger row, so a
+# non-Tesla station near 250 kW isn't matched or interpolated onto it.
+CHARGERS_W = [350000, 260000, SUPERCHARGER_W, 240000, 200000, 175000,
+              150000, 125000, 100000, 50000, 25000, 10900, 1440]
 CT_STEP_WH = 3870  # 5% of capacity
 
 # The 4.1 curve is charger-side power (what the dash/EA report). The time
@@ -148,11 +160,21 @@ def interp_curve(energy_wh: float) -> float:
     raise AssertionError
 
 
+def charger_power(charger_w: int, energy_wh: float) -> float:
+    """Charger-side power at this energy on this charger."""
+    if charger_w == SUPERCHARGER_W:
+        if energy_wh < SUPERCHARGER_FLAT_TO_WH:
+            return float(SUPERCHARGER_FLAT_W)
+        return min(SUPERCHARGER_FLAT_W, interp_curve(energy_wh))
+    return min(charger_w, interp_curve(energy_wh))
+
+
 def charge_table(charger_w: int) -> list[tuple[int, int]]:
     """Cumulative seconds to reach each energy step on this charger.
 
-    Fast chargers (>= PAUSE_MIN_CHARGER_W) get the thermal pause inserted as
-    a flat +PAUSE_SECONDS when cumulative energy crosses PAUSE_AT_WH.
+    Fast 800 V chargers (>= PAUSE_MIN_CHARGER_W, not the Supercharger row)
+    get the thermal pause inserted as a flat +PAUSE_SECONDS when cumulative
+    energy crosses PAUSE_AT_WH.
     """
     out = [(0, 0)]
     seconds = 0.0
@@ -160,11 +182,12 @@ def charge_table(charger_w: int) -> list[tuple[int, int]]:
     e = CT_STEP_WH
     while e <= CAPACITY_WH:
         # segment midpoint power, charger-side; scale to battery-side energy
-        p = min(charger_w, interp_curve(e - CT_STEP_WH / 2)) * CHARGE_ETA
+        p = charger_power(charger_w, e - CT_STEP_WH / 2) * CHARGE_ETA
         seconds += 3600.0 * CT_STEP_WH / p
         if (
             not paused
             and charger_w >= PAUSE_MIN_CHARGER_W
+            and charger_w != SUPERCHARGER_W
             and e >= PAUSE_AT_WH
         ):
             seconds += PAUSE_SECONDS

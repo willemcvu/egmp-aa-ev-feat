@@ -70,10 +70,10 @@ Write it as protobuf text (`vem.VehicleEnergyModel`), then `protoc --encode=vem.
 | `1.6`, `1.7` | 1.225 static density; **outside temp is live** (nav battery packet `DATC_OUT_TEMP_SNSR` via `NavigationCluster.requestBatteryInfoReq()`, patched in place at runtime) |
 | `2.x` road load | **your rolldown data** (conversions below) |
 | `3.7` loss map | not in rolldown. Scale Ford's map, or build one from an efficiency estimate. Remember x is **sint32** |
-| `4.1` | E-GMP 800 V curve, calibrated on 233 real EA sessions: ~233 kW (3C) flat to 62%, then 180/130/60/35/22/15 kW at 70/80/90/95/98/100%. Thermal pause lives in the 8.1 tables, not here. (Cold-pack caps measured but not shipped — see "field findings") |
+| `4.1` | E-GMP 800 V curve, calibrated on 233 real EA sessions: ~230–235 kW (3C) to 50%, thermal step-down to 160 kW at 53% held to 80%, 150 kW after the pause, then 60/35/22/15 kW at 90/95/98/100%. Thermal pause lives in the 8.1 tables, not here. (Cold-pack caps measured but not shipped — see "field findings") |
 | `5.4` | I²R: loss = R·(P/V)². Use the pack's DC resistance and ~650–700 V nominal. R is unmeasured; estimate it from the cell count and cell resistance, or from the voltage sag under load |
 | `7` aux power (Q4) | logged HVAC/aux draw, or published winter/summer consumption |
-| `8.1` | integrated from 4.1 (×η=0.95 charger→battery) + AC limits (10.9 kW onboard, 1.44 kW L1); 11 charger rows (350/250/200/175/150/125/100/50/25 kW DC); +300 s thermal pause at 62% on ≥200 kW rows |
+| `8.1` | integrated from 4.1 (×η=0.95 charger→battery) + AC limits (10.9 kW onboard, 1.44 kW L1); 13 charger rows (350/260/250/240/200/175/150/125/100/50/25 kW DC, 10.9/1.44 kW AC); +300 s thermal pause at ~81% on ≥200 kW rows. **250 kW = Tesla Supercharger**: US Superchargers are all listed at exactly 250 kW and run at ~500 V, so the 800 V pack charges via the boost converter at a flat 105 kW to 90% (owner-measured, no step-down or pause), then the normal taper. Maps keys these tables by charger power only, so the voltage limit has to live in that row; 260/240 kW rows bracket it so other stations near 250 kW stay on the 800 V profile |
 | leave out | `1.5`, `1.8`–`1.12`, 6, 9, 10 (Ford works without them) |
 
 ### Unit conversion for EPA-style rolldown (target) coefficients
