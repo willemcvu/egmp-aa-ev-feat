@@ -21,14 +21,16 @@ import com.hkmc.cluster.NavigationClusterListener;
  * nativeReportDiagnosticsData (see tools/patch_library.py).
  *
  * Live data sources:
- *  - DISPLAY_SOC via binder com.hkmc.micom.hev txn 3 (energy = SOC x capacity)
+ *  - DISPLAY_SOC via binder com.hkmc.micom.hev txn 3
  *  - the nav battery packet via NavigationCluster.requestBatteryInfoReq():
  *    DATC_OUT_TEMP_SNSR patches model field 1.7 (aux/HVAC table lookup)
  *    and road load A (cold penalty, EvModelTemplate.COLD_*);
  *    XEV_MIN_BATT_TEMP / EV_AVLBL_ENRG / VCU_DTE_* are logged for later
  *    calibration (cold-pack charge caps, remaining-energy units)
- *  - SOH probe via tm_hscan_service txn 0xd6 (capacity, gated by
- *    persist.gpm.ev.sohcap=1; raw value always logged once per session)
+ *  - EV_AVLBL_ENRG (BMS available energy, 2 Wh steps): current energy, and
+ *    usable capacity learned as available energy / SOC (see learnCapacity)
+ *  - BMS SOH via tm_hscan_service txn 0xd6: logged only (a health index,
+ *    not usable capacity)
  *
  * Threading: all sends happen holding LOCK; stop() takes LOCK and joins the
  * thread, and shutdown() calls stop() before nativeShutdown(), so a send never
@@ -44,19 +46,31 @@ public final class EvModelSender {
     private static final String HEV_SERVICE = "com.hkmc.micom.hev";
     private static final String HEV_TOKEN = "com.hkmc.hev.IHEVService";
 
-    // Battery SOH probe (degradation-aware capacity). Unverified transaction:
-    // the raw value is always logged; it is only USED when
-    // persist.gpm.ev.sohcap=1 and the value is in 0.1% units in [500, 1000].
+    // BMS SOH (whole percent; 95 on the owner's car). A health index
+    // (internal resistance, balance), NOT usable capacity: only logged.
     private static final String HCAN_SERVICE = "tm_hscan_service";
     private static final String HCAN_TOKEN =
             "com.hkmc.telematics.hscan.tm_interface.ITM_HSCANService";
     private static final int HCAN_TX_GET_SOH = 0xd6;  // getXEV_Bms_GDS_SOH
-    private static final String PROP_SOH_CAP = "persist.gpm.ev.sohcap";
+
+    // Usable capacity is learned from the BMS available energy (nav packet
+    // EV_AVLBL_ENRG, 2 Wh steps like BMS_EVENERGYCAPA) divided by display
+    // SOC. 14462 at 46.0% on the owner's car = 28.9 kWh -> 62.9 kWh usable.
+    // Only learned at >= CAP_MIN_HALF_PCT, where SOC's 0.5% step costs
+    // < 2.5%; smoothed; kept across sessions in CAP_FILE.
+    private static final int ENRG_WH_PER_UNIT = 2;
+    private static final int CAP_MIN_HALF_PCT = 40;      // 20% SOC
+    private static final int CAP_MIN_WH = 30000;
+    private static final int CAP_MAX_WH = 90000;
+    private static final float CAP_ALPHA = 0.1f;         // EMA weight per sample
+    private static final String CAP_FILE = "capacity_wh";
+    private static float sCapacityEst = -1f;             // <0: none yet
+    private static boolean sCapacityLoaded;
 
     // Navigation.BATTERY_INFO_RX packet indices (see
     // com.hkmc.micom.protocol.Navigation$BATTERY_INFO_RX).
     private static final int IDX_MIN_BATT_TEMP = 1;   // XEV_MIN_BATT_TEMP, C
-    private static final int IDX_EV_AVLBL_ENRG = 2;   // EV_AVLBL_ENRG, units TBD
+    private static final int IDX_EV_AVLBL_ENRG = 2;   // EV_AVLBL_ENRG, 2 Wh steps
     private static final int IDX_OUT_TEMP = 4;        // DATC_OUT_TEMP_SNSR, C
     private static final int IDX_DTE_BASE = 6;        // VCU_DTE_BASE
     private static final int IDX_DTE_ADD = 7;         // VCU_DTE_ADD
@@ -78,13 +92,14 @@ public final class EvModelSender {
     private static IBinder sHev;
     private static IBinder sHcan;
     private static int sLastGoodHalfPct = -1;
-    private static int sCapacityWh = -1;  // <0: not probed yet
+    private static int sSohRaw = Integer.MIN_VALUE;      // read once per process
 
     // nav battery packet state (written by the cluster callback thread)
     private static NavigationCluster sNavCluster;
     private static volatile long sNavPacketAt;
     private static volatile int sPackTempC = Integer.MIN_VALUE;
     private static volatile int sOutsideTempC = Integer.MIN_VALUE;
+    private static volatile int sOutTempRaw = Integer.MIN_VALUE;
     private static volatile int sAvlblEnrg = -1;
     private static volatile int sDteBase = -1;
     private static volatile int sDteAdd = -1;
@@ -154,8 +169,11 @@ public final class EvModelSender {
                 }
                 if (sSource != null) {
                     pollNavClusterLocked();
+                    int halfPct = displaySocHalfPct();
+                    int availWh = availableEnergyWh();
+                    learnCapacity(halfPct, availWh);
                     int cap = capacityWh();
-                    int wh = currentEnergyWh(cap);
+                    int wh = currentEnergyWh(halfPct, availWh, cap);
                     byte[] msg = (byte[]) sTemplate.clone();
                     writeFixedVarint(msg, EvModelTemplate.CAPACITY_OFFSET, cap,
                             EvModelTemplate.CAPACITY_WIDTH);
@@ -170,11 +188,13 @@ public final class EvModelSender {
                     writeFloatLe(msg, EvModelTemplate.ROAD_A_OFFSET, roadA);
                     int rc = sSource.sendRawMessage(msg);
                     Log.i(TAG, "energy model sent: " + wh + " Wh of " + cap
-                            + " Wh, rc=" + rc + ", pack=" + packTempStr()
+                            + " Wh (" + capacitySource() + "), soc=" + halfPct
+                            + "/200, rc=" + rc + ", pack=" + packTempStr()
                             + "C, out=" + (outC == Integer.MIN_VALUE ? "?" : outC)
-                            + "C, A=" + Math.round(roadA)
+                            + "C (raw " + sOutTempRaw + "), A=" + Math.round(roadA)
                             + "N, enrg=" + sAvlblEnrg
-                            + ", dte=" + sDteBase + "+" + sDteAdd);
+                            + ", dte=" + sDteBase + "+" + sDteAdd
+                            + ", soh=" + sohRaw());
                 }
             }
             try {
@@ -197,6 +217,7 @@ public final class EvModelSender {
                     sNavPacketAt = SystemClock.uptimeMillis();
                     sPackTempC = (byte) d[IDX_MIN_BATT_TEMP];
                     sOutsideTempC = (byte) d[IDX_OUT_TEMP];
+                    sOutTempRaw = d[IDX_OUT_TEMP];
                     sAvlblEnrg = d[IDX_EV_AVLBL_ENRG];
                     sDteBase = d[IDX_DTE_BASE];
                     sDteAdd = d[IDX_DTE_ADD];
@@ -295,52 +316,135 @@ public final class EvModelSender {
 
     // ---- energy/capacity ---------------------------------------------------
 
-    /** Current battery energy in Wh from DISPLAY_SOC (0.5% steps) x capacity. */
-    private static int currentEnergyWh(int capacityWh) {
+    /** DISPLAY_SOC in 0.5% steps (0..200), last good value on a failed read. */
+    private static int displaySocHalfPct() {
         int halfPct = getHevStatus(HEV_FLAG_DISPLAY_SOC);
         if (halfPct < 0 || halfPct > 200) {
-            halfPct = sLastGoodHalfPct >= 0
-                    ? sLastGoodHalfPct : EvModelTemplate.ENERGY_PLACEHOLDER_WH * 200
-                            / capacityWh;
-        } else {
-            sLastGoodHalfPct = halfPct;
+            return sLastGoodHalfPct;
         }
-        int wh = (int) ((long) halfPct * capacityWh / 200);
-        return Math.max(wh, MIN_ENERGY_WH);
+        sLastGoodHalfPct = halfPct;
+        return halfPct;
+    }
+
+    /** BMS available energy in Wh from a fresh nav packet, -1 if none. */
+    private static int availableEnergyWh() {
+        if (!navFresh() || sAvlblEnrg <= 0) {
+            return -1;
+        }
+        int wh = sAvlblEnrg * ENRG_WH_PER_UNIT;
+        return wh <= CAP_MAX_WH ? wh : -1;
     }
 
     /**
-     * Usable capacity in Wh: nominal unless the SOH probe is enabled
-     * (persist.gpm.ev.sohcap=1) and returns a sane 0.1% value.
+     * Current energy in Wh: the BMS available energy when known (finer than
+     * SOC), else SOC x capacity. Never below MIN_ENERGY_WH.
      */
+    private static int currentEnergyWh(int halfPct, int availWh, int capacityWh) {
+        int wh;
+        if (availWh > 0) {
+            wh = availWh;
+        } else if (halfPct >= 0) {
+            wh = (int) ((long) halfPct * capacityWh / 200);
+        } else {
+            wh = EvModelTemplate.ENERGY_PLACEHOLDER_WH;
+        }
+        return Math.max(wh, MIN_ENERGY_WH);
+    }
+
+    /** One capacity sample (available energy / SOC) into the estimate. */
+    private static void learnCapacity(int halfPct, int availWh) {
+        loadCapacity();
+        if (availWh <= 0 || halfPct < CAP_MIN_HALF_PCT) {
+            return;
+        }
+        float sample = (float) availWh * 200f / halfPct;
+        if (sample < CAP_MIN_WH || sample > CAP_MAX_WH) {
+            return;
+        }
+        int before = Math.round(sCapacityEst);
+        sCapacityEst = sCapacityEst < 0 ? sample
+                : sCapacityEst + CAP_ALPHA * (sample - sCapacityEst);
+        if (Math.abs(Math.round(sCapacityEst) - before) >= 100) {
+            saveCapacity();
+        }
+    }
+
+    /** Usable capacity in Wh, rounded to 100 Wh; nominal until learned. */
     private static int capacityWh() {
-        if (sCapacityWh < 0) {
-            sCapacityWh = probeCapacityWh();
+        if (sCapacityEst < 0) {
+            return EvModelTemplate.CAPACITY_WH;
         }
-        return sCapacityWh;
+        return Math.round(sCapacityEst / 100f) * 100;
     }
 
-    private static int probeCapacityWh() {
-        int nominal = EvModelTemplate.CAPACITY_WH;
-        int raw = getSohRaw();
-        Log.i(TAG, "SOH probe raw value: " + raw
-                + (isSohCapEnabled() ? " (sohcap enabled)" : " (sohcap disabled)"));
-        if (!isSohCapEnabled() || raw < 500 || raw > 1000) {
-            return nominal;
-        }
-        int cap = (int) ((long) nominal * raw / 1000);
-        Log.i(TAG, "using SOH-derived capacity: " + cap + " Wh");
-        return cap;
+    static String capacitySource() {
+        return sCapacityEst < 0 ? "nominal" : "bms";
     }
 
-    private static boolean isSohCapEnabled() {
+    static int sohRaw() {
+        if (sSohRaw == Integer.MIN_VALUE) {
+            sSohRaw = getSohRaw();
+            Log.i(TAG, "BMS SOH raw: " + sSohRaw);
+        }
+        return sSohRaw;
+    }
+
+    private static void loadCapacity() {
+        if (sCapacityLoaded) {
+            return;
+        }
+        sCapacityLoaded = true;
+        java.io.File f = appFile(CAP_FILE);
+        if (f == null || !f.isFile()) {
+            return;
+        }
         try {
-            String v = (String) Class.forName("android.os.SystemProperties")
-                    .getMethod("get", String.class, String.class)
-                    .invoke(null, PROP_SOH_CAP, "0");
-            return "1".equals(v);
+            java.io.BufferedReader r = new java.io.BufferedReader(
+                    new java.io.FileReader(f));
+            try {
+                int v = Integer.parseInt(r.readLine().trim());
+                if (v >= CAP_MIN_WH && v <= CAP_MAX_WH) {
+                    sCapacityEst = v;
+                    Log.i(TAG, "learned capacity loaded: " + v + " Wh");
+                }
+            } finally {
+                r.close();
+            }
         } catch (Throwable t) {
-            return false;
+            Log.w(TAG, "capacity file unreadable: " + t);
+        }
+    }
+
+    private static void saveCapacity() {
+        java.io.File f = appFile(CAP_FILE);
+        if (f == null) {
+            return;
+        }
+        try {
+            java.io.File tmp = new java.io.File(f.getPath() + ".tmp");
+            java.io.FileWriter w = new java.io.FileWriter(tmp);
+            try {
+                w.write(Math.round(sCapacityEst) + "\n");
+            } finally {
+                w.close();
+            }
+            if (!tmp.renameTo(f)) {
+                tmp.delete();
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "capacity file not saved: " + t);
+        }
+    }
+
+    /** A file in GPM's own files dir, or null without an app context. */
+    static java.io.File appFile(String name) {
+        try {
+            Context ctx = (Context) Class.forName("android.app.ActivityThread")
+                    .getMethod("currentApplication")
+                    .invoke(null);
+            return ctx == null ? null : new java.io.File(ctx.getFilesDir(), name);
+        } catch (Throwable t) {
+            return null;
         }
     }
 
