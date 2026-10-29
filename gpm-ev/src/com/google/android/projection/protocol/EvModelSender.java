@@ -195,6 +195,27 @@ public final class EvModelSender {
                     return;
                 }
                 if (sSource != null) {
+                    try {
+                        tickLocked();
+                    } catch (Throwable t) {
+                        logTickFailure(t);
+                    }
+                }
+            }
+            try {
+                Thread.sleep(PERIOD_MS);
+            } catch (InterruptedException e) {
+                // ignore
+            }
+        }
+    }
+
+    /**
+     * One send (and log row). Runs inside GPM: anything it throws is caught
+     * by loop(), because an uncaught exception here kills GPM and with it
+     * Android Auto.
+     */
+    private static void tickLocked() {
                     pollNavClusterLocked();
                     int halfPct = displaySocHalfPct();
                     int availWh = availableEnergyWh();
@@ -222,15 +243,23 @@ public final class EvModelSender {
                             + "C, out=" + (outOk ? String.valueOf(outC) : "?")
                             + "C (raw " + sOutTempRaw + "), A=" + Math.round(roadA)
                             + "N, dte=" + sDteBase + "+" + sDteAdd + "km");
-                    logRow(halfPct, wh, cap, outOk ? Float.valueOf(outC) : null,
-                            roadA);
-                }
-            }
-            try {
-                Thread.sleep(PERIOD_MS);
-            } catch (InterruptedException e) {
-                // ignore
-            }
+                    try {
+                        logRow(halfPct, wh, cap, outOk ? Float.valueOf(outC) : null,
+                                roadA);
+                    } catch (Throwable t) {
+                        logTickFailure(t);
+                    }
+    }
+
+    private static int sTickFailures;
+
+    /** Log a caught failure (first few in full, then a count every 100). */
+    private static void logTickFailure(Throwable t) {
+        sTickFailures++;
+        if (sTickFailures <= 3) {
+            Log.e(TAG, "tick failed (caught, AA unaffected)", t);
+        } else if (sTickFailures % 100 == 0) {
+            Log.e(TAG, "tick failed " + sTickFailures + " times, last: " + t);
         }
     }
 
@@ -504,7 +533,7 @@ public final class EvModelSender {
         Object odoDelta = odo > 0 && odo >= sOdoStartRaw
                 ? Float.valueOf((odo - sOdoStartRaw) / 10f) : null;
         float speed = hscanFloat(HCAN_TX_GET_CAR_SPEED, 0);  // 0 = km/h
-        Object[] v = new Object[19 + LOG_FLAGS.length];
+        Object[] v = new Object[EvLogger.COLUMNS.length - 1];  // all but t_s
         int i = 0;
         v[i++] = halfPct >= 0 ? Integer.valueOf(halfPct) : null;
         v[i++] = Integer.valueOf(wh);
@@ -534,6 +563,10 @@ public final class EvModelSender {
         v[i++] = nav ? Integer.valueOf(Precond.isCharger() ? 1 : 0) : null;
         v[i++] = nav && kw >= 0 ? Integer.valueOf(kw) : null;
         v[i++] = Integer.valueOf(Precond.state());
+        if (i != v.length) {
+            throw new IllegalStateException("log row has " + i + " values for "
+                    + v.length + " columns");
+        }
         EvLogger.row(SystemClock.uptimeMillis(), v);
     }
 
