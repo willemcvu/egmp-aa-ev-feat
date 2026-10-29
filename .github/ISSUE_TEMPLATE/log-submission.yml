@@ -1,7 +1,7 @@
-name: Drive log submission
-description: Contribute cleaned drive logs to improve the EV energy model.
-title: "Drive logs: "
-labels: ["drive-log"]
+name: EV log submission
+description: Contribute cleaned EV logs (driving and charging) to improve the energy model.
+title: "EV logs: "
+labels: ["ev-log"]
 body:
   - type: markdown
     attributes:

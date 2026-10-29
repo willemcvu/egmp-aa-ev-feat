@@ -127,7 +127,7 @@
       lines.push(l);
     });
     var carList = Object.keys(cars), yearList = Object.keys(years);
-    var title = "Drive logs: " + (carList.join(", ") || "car") + (yearList.length ? " " + yearList.join("/") : "") +
+    var title = "EV logs: " + (carList.join(", ") || "car") + (yearList.length ? " " + yearList.join("/") : "") +
       ", " + cleaned.length + " session" + (cleaned.length === 1 ? "" : "s");
     var p = new URLSearchParams();
     p.set("template", "log-submission.yml");
