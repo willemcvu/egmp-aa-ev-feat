@@ -29,6 +29,18 @@ It upgrades earlier versions in place. To uninstall: NEMESIS Manager (press NAV 
 
 The release contains no Hyundai or Google files, only small binary deltas that [`lpatch`](third_party/lpatch) applies to your unit's own files.
 
+## EV logs
+
+The head unit records a small log whenever the car is on, driving or charging: battery energy and power, speed, temperatures, climate, charging and Maps' route plan. No location, no full VIN, no times of day. It keeps up to 100 MB, oldest first out.
+
+To collect and share them:
+
+1. Make a folder named `egmp-aa-ev-logs` at the top level of any FAT32/exFAT USB drive.
+2. With the car on, plug the drive into the USB data port. Within about 20 seconds a pop-up says how many logs were copied ("… Safe to remove").
+3. Open an [EV log issue](https://github.com/willemcvu/egmp-aa-ev-feat/issues/new?template=log-submission.yml) and drag the `egmp-*.csv` files from that folder into it. Issues are public.
+
+Logs from different cars, climates and battery ages are what improve the energy model most. Format details: [LOGGING](docs/LOGGING.md).
+
 ## Docs
 
 | | |
