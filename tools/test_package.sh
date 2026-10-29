@@ -26,12 +26,32 @@ T=/tmp/opencode/pkgtest
 rm -rf "$T"
 mkdir -p "$T"
 
-PRIV=private/car-current-leafia105
-SUM_BASE_APK=0308224b94c7e1b81d372a8ea1535aed
-SUM_BASE_ODEX=7d81a60aabf89efdd4ce12ba9787248e
+# CAR=neev|ev6 (tools/cars.sh); default: the first car with inputs.
+. tools/cars.sh
+CAR="${CAR:-$(set -- $(cars_present); echo "$1")}"
+car_inputs "$CAR" || exit 1
+PRIV=$LEAFIA_DIR
+case "$CAR" in
+    neev) PRODUCT=NEEV.USA.0000.V015.012.260507 ;;
+    ev6)  PRODUCT=CVEV.USA.0000.V015.012.260507 ;;
+esac
+SUM_BASE_APK=$(md5sum "$PRIV/HKMC_GPM.apk" | cut -d' ' -f1)
 SUM_BASE_LIB=c08410a8d32a615b1aa805cd8a243d52
-SUM_PAY_APK=$(md5sum dist/HKMC_GPM.apk | cut -d' ' -f1)
+SUM_PAY_APK=$(md5sum "dist/$CAR/HKMC_GPM.apk" | cut -d' ' -f1)
 SUM_PAY_LIB=$(md5sum dist/libautoreceiver_infobank.so | cut -d' ' -f1)
+# The odex is the one the head unit wrote, and it isn't in every car's inputs.
+# Without it, use a stand-in and point the sandboxed scripts' base odex md5 at it.
+if [ -s "$PRIV/HKMC_GPM.odex" ]; then
+    ODEX_SRC=$PRIV/HKMC_GPM.odex
+    ODEX_STANDIN=""
+else
+    ODEX_SRC=$T/standin.odex
+    echo "STAND-IN ODEX for $CAR" > "$ODEX_SRC"
+    ODEX_STANDIN=1
+    echo "note: no $PRIV/HKMC_GPM.odex, testing with a stand-in odex"
+fi
+SUM_BASE_ODEX=$(md5sum "$ODEX_SRC" | cut -d' ' -f1)
+echo "car: $CAR ($PRODUCT)"
 
 md5_of() { md5sum "$1" | cut -d' ' -f1; }
 
@@ -43,7 +63,7 @@ setup_sandbox() {
              "$S/data/nemesis/apps/aa.ev.model" "$S/data/nemesis/bin" \
              "$S/data/dalvik-cache"
     cp "$PRIV/HKMC_GPM.apk" "$S/system/app/HKMC_GPM.apk"
-    cp "$PRIV/HKMC_GPM.odex" "$S/system/app/HKMC_GPM.odex"
+    cp "$ODEX_SRC" "$S/system/app/HKMC_GPM.odex"
     cp "$PRIV/libautoreceiver_infobank.so" "$S/system/lib/libautoreceiver_infobank.so"
 
     # The package, with absolute paths rewritten into the sandbox. files/ holds
@@ -56,6 +76,11 @@ setup_sandbox() {
                 "packages/aa-ev-model/$f" > "$S/data/nemesis/apps/aa.ev.model/$f" ;;
         esac
     done
+    if [ -n "$ODEX_STANDIN" ]; then
+        local _c="$S/data/nemesis/apps/aa.ev.model/scripts/common.sh" _real
+        _real=$(sed -n "/^    $CAR)/,/;;/s/.*SUM_BASE_ODEX=\([0-9a-f]*\).*/\1/p" "$_c")
+        sed -i "s/$_real/$SUM_BASE_ODEX/" "$_c"
+    fi
 
     # Stub car commands.
     cat > "$S/system/xbin/nemesis" <<'EOF'
@@ -76,6 +101,7 @@ EOF
     cat > "$S/system/bin/getprop" <<'EOF'
 #!/bin/bash
 [ "$1" = sys.boot_completed ] && echo 1
+[ "$1" = ro.build.product ] && echo "$PRODUCT"
 exit 0
 EOF
     cat > "$S/system/bin/dexopt" <<'EOF'
@@ -111,6 +137,16 @@ fi
 exec /bin/ls "$@"
 EOF
     chmod +x "$S/system/bin/ls"
+    # the stub heredoc is quoted: put this car's product id in literally
+    sed -i "s|\"\$PRODUCT\"|$PRODUCT|" "$S/system/bin/getprop"
+    # Without binfmt (e.g. in a container), run the same ARM lpatch through qemu.
+    local _lp="$S/data/nemesis/apps/aa.ev.model/files/lpatch"
+    if ! "$_lp" >/dev/null 2>&1 && [ "$("$_lp" 2>&1 | grep -c usage)" = 0 ] && command -v qemu-arm-static >/dev/null; then
+        mv "$_lp" "$_lp.arm"
+        # absolute path: the package scripts reset PATH to the car's dirs
+        printf '#!/bin/sh\nexec %s "$0.arm" "$@"\n' "$(command -v qemu-arm-static)" > "$_lp"
+        chmod 755 "$_lp" "$_lp.arm"
+    fi
     chmod +x "$S/system/xbin/nemesis" "$S/data/nemesis/bin/md5" "$S/system/bin/pm" \
              "$S/system/bin/getprop" "$S/system/bin/dexopt" "$S/system/bin/am" \
              "$S/system/bin/reboot" "$S/system/bin/sleep"
@@ -261,10 +297,27 @@ check "pre.sh refuses with a damaged snapshot" $?
 [ "$(md5_of "$S/system/app/HKMC_GPM.apk")" = "$_before" ]
 check "live APK untouched" $?
 
+echo "=== 7b. refusal on an unsupported car ==="
+S=$T/s7b
+setup_sandbox "$S"
+sed -i "s|$PRODUCT|OTHER.USA.0000.V015.012.260507|" "$S/system/bin/getprop"
+run_script "$S" pre.sh > "$T/s7b.pre.log" 2>&1
+[ $? -ne 0 ]
+check "pre.sh refuses another car's product id" $?
+[ "$(md5_of "$S/system/app/HKMC_GPM.apk")" = "$SUM_BASE_APK" ]
+check "live APK untouched" $?
+
 echo "=== 8. package contents ==="
+_cars=$(cd packages/aa-ev-model/files && LC_ALL=C ls -d */ 2>/dev/null | tr -d / | tr '\n' ' ')
 [ "$(cd packages/aa-ev-model/files && LC_ALL=C ls | LC_ALL=C sort | tr '\n' ' ')" = \
-  "HKMC_GPM.apk.lpd MD5SUMS libautoreceiver_infobank.so.lpd lpatch " ]
-check "files/ holds only deltas, lpatch and MD5SUMS" $?
+  "$(echo $_cars lpatch | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ' ')" ]
+check "files/ holds only lpatch and one folder per car ($_cars)" $?
+_ok=0
+for _c in $_cars; do
+    [ "$(cd "packages/aa-ev-model/files/$_c" && LC_ALL=C ls | LC_ALL=C sort | tr '\n' ' ')" = \
+      "HKMC_GPM.apk.lpd MD5SUMS libautoreceiver_infobank.so.lpd " ] || _ok=1
+done
+check "each car folder holds only its deltas and MD5SUMS" $_ok
 ! unzip -l dist/aa.ev.model.zip | grep -E '\.(apk|so|odex|dex)$' >/dev/null
 check "package zip has no APK/so/odex/dex" $?
 
