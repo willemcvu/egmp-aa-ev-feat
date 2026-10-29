@@ -442,8 +442,7 @@ public final class PrecondCore {
         if (changed) {
             waitReason = "";
             if (found != null) {
-                logger.log("target: stop #" + found.index + ", " + kw + " kW"
-                        + (found.hasStation ? "" : " (name match)"));
+                logger.log("target: stop #" + found.index + ", " + kw + " kW");
             } else {
                 logger.log("no DC charger target");
                 if (owned) {

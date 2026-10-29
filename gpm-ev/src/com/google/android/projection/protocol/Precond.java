@@ -83,7 +83,7 @@ public final class Precond {
         return c != null && c.isCharger();
     }
 
-    /** max_power_kw of that stop (150 for a name match); -1 unknown. */
+    /** Charger power of that stop in kW (from Maps' W); -1 unknown. */
     public static int chargerKw() {
         PrecondCore c = sCore;
         return c == null ? -1 : c.chargerKw();
