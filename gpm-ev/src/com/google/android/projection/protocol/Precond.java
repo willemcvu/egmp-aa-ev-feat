@@ -329,13 +329,12 @@ public final class Precond {
         private static final int FLAG_BATT_COND = 94;
         private static final int TX_BCM_COND_INDICATOR = 109;
 
-        // gen5w-preconditioning PreconditioningProfile (Ioniq 5 US 260507).
-        // Its device name is the 2023 unit's; the owner's 2022 reports
-        // wp_daudioplus_neev_us with byte-identical framework odex files
-        // (same SHA-256 below, so the same binder interface): accept both.
-        static final String[] DEVICES = {
-            "wp_daudioplus_neev_us", "wp_daudioplus_neev23_us",
-        };
+        // The binder transaction numbers we send (HEV 3/62/65/66, BCM 109)
+        // are defined by the car framework's method order, so commands are
+        // only sent when the framework is byte-for-byte the one they were
+        // verified on (Ioniq 5 US 260507, as in gen5w-preconditioning's
+        // profile and our private/car-neev-260507). No device-name check:
+        // identical framework files mean identical numbers.
         static final String FRAMEWORK_SHA256 =
                 "dd72e04bce0a2b4bda1506308ac21f91002c1436553b8156c345cc4313661338";
         static final String SERVICE_SHA256 =
@@ -350,7 +349,7 @@ public final class Precond {
             }
             boolean ok;
             try {
-                ok = Build.VERSION.SDK_INT == 19 && knownDevice(Build.DEVICE)
+                ok = Build.VERSION.SDK_INT == 19
                         && FRAMEWORK_SHA256.equals(
                                 sha256("/system/framework/automotive.odex"))
                         && SERVICE_SHA256.equals(
@@ -454,15 +453,6 @@ public final class Precond {
                 data.recycle();
                 reply.recycle();
             }
-        }
-
-        static boolean knownDevice(String d) {
-            for (String x : DEVICES) {
-                if (x.equals(d)) {
-                    return true;
-                }
-            }
-            return false;
         }
 
         private static String sha256(String path) throws Exception {
