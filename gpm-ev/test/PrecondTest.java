@@ -164,7 +164,10 @@ public final class PrecondTest {
         varint(o, v);
     }
 
-    /** dests: pairs of {address String or null, int[]{conn, avail, kw} or null}. */
+    /**
+     * dests: pairs of {address String or null, int[]{departure Wh, power W,
+     * charge s (-1 = none, encoded as int64 like the car sends)} or null}.
+     */
     static String sMsg(Object[] dests) {
         ByteArrayOutputStream m = new ByteArrayOutputStream();
         ByteArrayOutputStream step = new ByteArrayOutputStream();
@@ -180,7 +183,7 @@ public final class PrecondTest {
                 ByteArrayOutputStream cs = new ByteArrayOutputStream();
                 if (st[0] >= 0) field(cs, 1, st[0]);
                 if (st[1] >= 0) field(cs, 2, st[1]);
-                if (st[2] >= 0) field(cs, 3, st[2]);
+                field(cs, 3, (long) st[2]);
                 field(d, 2, cs.toByteArray());
             }
             field(m, 2, d.toByteArray());
@@ -213,7 +216,10 @@ public final class PrecondTest {
         return "P " + b.length + " " + hex(b);
     }
 
-    static final int[] DC150 = {8, 6, 150};
+    // Shaped like the captured stops: departure Wh, power W, charge s.
+    static final int[] DC150 = {33744, 150000, -1};
+    static final int[] L2_7KW = {34999, 7000, -1};
+    static final int[] DC350_STOP = {77400, 350000, 1432};
     static final String START_30_20 = "65(30) 66(20) sleep10 62(2,3) sleep130";
     static final String CANCEL = "65(2047) 66(1023) 62(0,0) sleep130";
 
@@ -234,8 +240,19 @@ public final class PrecondTest {
 
         NavProto.Dump c = NavProto.parse(sMsg(new Object[] {"x", DC150}));
         NavProto.Destination cd = c.destinations.get(0);
-        check("station parsed", cd.hasStation && cd.connectorCount == 8
-                && cd.availableCount == 6 && cd.maxPowerKw == 150);
+        check("station parsed", cd.hasStation && cd.departureWh == 33744
+                && cd.chargeSeconds == -1 && cd.maxPowerKw == 150);
+        NavProto.Destination l2 = NavProto.parse(sMsg(new Object[] {"x", L2_7KW}))
+                .destinations.get(0);
+        check("L2 parsed as 7 kW", l2.hasStation && l2.maxPowerKw == 7);
+        NavProto.Dump trip = NavProto.parse(sMsg(new Object[] {
+            "s1", DC350_STOP, "s2", new int[] {61859, 240000, 600}, "end", null}));
+        check("planned trip: 3 dests, stop 1 350 kW 1432 s",
+                trip.destinations.size() == 3
+                && trip.destinations.get(0).maxPowerKw == 350
+                && trip.destinations.get(0).chargeSeconds == 1432
+                && trip.destinations.get(1).maxPowerKw == 240
+                && !trip.destinations.get(2).hasStation);
 
         NavProto.Dump two = NavProto.parse(sMsg(new Object[] {"a", null, "b", DC150}));
         check("two destinations", two.destinations.size() == 2
@@ -359,11 +376,11 @@ public final class PrecondTest {
         q.route(DC150, "C", 30000, 1200);
         q.ticks(1);
         q.v.drain();
-        q.dump(sMsg(new Object[] {"Other charger", new int[] {4, 4, 350}}));
+        q.dump(sMsg(new Object[] {"Other charger", new int[] {70000, 350000, -1}}));
         q.ticks(1);
         check("charger -> other DC charger keeps request (no new 62)",
                 q.v.drain().equals("65(30) 66(20)"));
-        q.dump(sMsg(new Object[] {"L2", new int[] {2, 2, 11}}));
+        q.dump(sMsg(new Object[] {"L2", new int[] {35000, 11000, -1}}));
         check("charger -> L2 cancels", q.v.drain().equals(CANCEL));
     }
 
@@ -467,7 +484,7 @@ public final class PrecondTest {
 
     static void testConditions() throws Exception {
         Rig l2 = new Rig(PrecondCore.MODE_ON_NAMES);
-        l2.route(new int[] {2, 2, 11}, "Level 2", 30000, 1200);
+        l2.route(new int[] {35000, 11000, -1}, "Level 2", 30000, 1200);
         l2.ticks(10);
         check("L2 charger: no start", l2.v.drain().isEmpty());
 
@@ -546,7 +563,7 @@ public final class PrecondTest {
         r.v.indicator = 0;
         r.ticks(1);
         // Maps drops A, B is a second charger further on
-        r.dump(sMsg(new Object[] {"Charger B", new int[] {4, 2, 350}, "Home", null}));
+        r.dump(sMsg(new Object[] {"Charger B", new int[] {77400, 350000, 900}, "Home", null}));
         r.dump(pMsg(new int[][] {{60000, 2400}, {270000, 10800}}));
         r.ticks(1);
         check("multi-stop: starts again for the next charger",

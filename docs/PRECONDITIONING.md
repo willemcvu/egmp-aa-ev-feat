@@ -6,15 +6,15 @@ Goal: when Google Maps on Android Auto is guiding to a DC fast charger (the dest
 
 ## Short answer
 
-**Yes, mostly. Time and distance are already arriving on the head unit. The "this is a charger" flag exists in the protocol, but nobody has yet seen Maps fill it in on this car.**
+**Yes. Time and distance arrive on the head unit, and Maps marks charging stops (confirmed on the car 2026-10-29, [Test 1](#test-1-does-maps-mark-chargers-no-install)).**
 
 | Need | Status | Where it comes from |
 |---|---|---|
 | Distance to destination | **Have it, seen live** | AA message 0x8007, metres (`22230` in our capture = 13.8 mi) |
 | Time to destination | **Have it, seen live** | AA message 0x8007, seconds (`1455`) |
 | Route active / cancelled | **Have it** | AA NavigationState → GPM `onStatus(I)` |
-| "Destination is a charging station" | **Protocol field exists; not yet observed** | AA message 0x8006, `destinations[].charging_station` {connector_count, available_count, max_power_kw} |
-| Charging stops along a longer route | **Unknown** | Probably 0x8006 `destinations[]` is one entry per remaining stop, with 0x8007 giving distance/time to each. Needs a capture. |
+| "Destination is a charging station" | **Have it, seen live** | AA 0x8006 `destinations[].2` = {1 departure energy Wh, 2 charger power **W**, 3 planned charging time s, −1 = none} |
+| Charging stops along a longer route | **Have it, seen live** | 0x8006 lists every stop in order (chargers carry field 2; the final destination doesn't). 0x8007 carries **one** entry: the next stop |
 | Car-side "precondition for a charger N km / M min away" | **Have it** | `IHEVService` transactions 62/65/66, the same inputs the car's own nav uses (see below) |
 
 The open question can be answered **with no install**: Leafia's GPM already logs every 0x8006/0x8007 payload as `NAVDUMP`. One parked test session routing to a charger answers it (see [Test 1](#test-1-does-maps-mark-chargers-no-install)).
@@ -212,6 +212,16 @@ Then in Maps on the car screen, one at a time, giving each ~30 s:
 
 Decode each unique `S`/`P` payload with `reference/pbdump.py`. Look for `.2.2` in `S` (charging_station) and for multiple `.2` entries in both. This answers the main question and the multi-stop question.
 
+**Result (2026-10-29, owner's car, steps 1–3):**
+
+| Route | `destinations[]` | 0x8007 entries |
+|---|---|---|
+| DC fast charger | 1 dest, `.2` = {1: 33744, 2: 180000, 3: −1} | 1 (9.9 km, 665 s) |
+| Level 2 charger | 1 dest, `.2` = {1: 34999, 2: 7000, 3: −1} | 1 |
+| Long trip, Maps-planned stops | 3 dests: {77400, 350000, 1432}, {61859, 240000, 600}, then the destination with no `.2` | **1** (126.8 km, 6371 s: the next stop) |
+
+So `.2` is the energy-forecast "charging station details" shape: departure energy (Wh; 77400 = charge to the capacity we sent), charger max power in **W**, planned charging time in s (int64 −1 = none planned). Not open-android-auto's {connector_count, available_count, max_power_kw}. The first `NavProto` parsed that guessed layout and would never have found a DC charger; fixed. Payloads up to 136 bytes arrived intact. Since 0x8007 only covers the next stop, a charger later in the route is only timed once it becomes the next stop.
+
 ### Test 2: car-side command on your Ioniq 5 (only if the manual app hasn't been confirmed on your car)
 
 Run the manual Launchpad app once, cold battery, and confirm the indicator goes Active (Launchpad shows it). That validates the 62/65/66 profile on NEEV, which the automatic mode reuses.
@@ -230,8 +240,8 @@ If anything goes wrong: `setprop persist.gpm.precond 0` (no reboot needed), or u
 
 ## Open questions
 
-- Does Maps fill `charging_station` for (a) a charger destination, (b) auto-added charging stops, (c) manually added ones? (Test 1)
-- Do `destinations[]` / 0x8007 field 2 list every remaining stop, in order?
+- Manually added charger stops (Test 1 step 4) weren't captured; (a) a charger destination and (b) Maps-planned stops both carry `.2`.
+- Confirm on a real multi-stop drive that the single 0x8007 entry is the next stop (the drive log records `nav_rem_m` alongside the stops).
 - Exact meaning of station flag 2 / type 3, and whether the BMS uses distance, time or both. Tyler Harvey's Ioniq5_CAN `preconditioning_messages` logs might help.
 - Does Leafia's NAVDUMP pass payloads of any length? Ours were 36–69 bytes. Multi-step routes with lanes will be longer.
 - What "PDK 5.1" corresponds to, and whether 0x8008 is reachable at all.

@@ -605,8 +605,8 @@ public final class PrecondCore {
             sb.append(" [").append(x.index).append(':');
             if (x.hasStation) {
                 sb.append(" station kw=").append(x.maxPowerKw)
-                        .append(' ').append(x.availableCount).append('/')
-                        .append(x.connectorCount);
+                        .append(" dep=").append(x.departureWh)
+                        .append("Wh chg=").append(x.chargeSeconds).append('s');
             } else {
                 sb.append(" -");
             }

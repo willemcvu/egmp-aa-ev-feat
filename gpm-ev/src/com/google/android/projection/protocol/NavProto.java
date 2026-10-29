@@ -9,12 +9,19 @@ import java.util.Locale;
  * Leafia's native hook hands to GPM as NAVDUMP strings:
  *
  *   "S <len> <hex>"  0x8006 NavigationNotification
- *       2 destinations (repeated) { 1 address, 2 charging_station
- *                                   { 1 connector_count, 2 available_count,
- *                                     3 max_power_kw } }
+ *       2 destinations (repeated) { 1 address, 2 charging stop
+ *                                   { 1 departure energy Wh,
+ *                                     2 charger max power W,
+ *                                     3 planned charging time s (-1 none) } }
  *   "P <len> <hex>"  0x8007 NextTurnDistanceEvent
- *       2 per-destination (repeated) { 1 { 1 meters, 2 text, 3 unit },
- *                                      2 eta text, 3 seconds remaining }
+ *       2 { 1 { 1 meters, 2 text, 3 unit }, 2 eta text, 3 seconds remaining }
+ *
+ * Layout of the charging-stop message verified on the owner's car
+ * 2026-10-29 (Maps routes to a 180 kW DC charger, a 7 kW L2 charger and a
+ * trip with two planned stops: {350000 W, 1432 s} then {240000 W, 600 s},
+ * final destination plain). It is the energy-forecast "charging station
+ * details" shape, not the connector-count one in open-android-auto's notes.
+ * 0x8007 carried ONE entry even with three destinations: the next stop.
  *
  * Pure Java (no Android), so it runs in the host test. Address strings are
  * only looked at transiently (DC network name match, and a hash used as the
@@ -31,23 +38,23 @@ public final class NavProto {
     /** One entry of NavigationNotification.destinations. */
     public static final class Destination {
         public final int index;
-        /** charging_station (field 2) present. */
+        /** charging stop (field 2) present. */
         public final boolean hasStation;
-        public final int connectorCount;   // -1 if absent
-        public final int availableCount;   // -1 if absent
-        public final int maxPowerKw;       // -1 if absent
+        public final int departureWh;      // -1 if absent
+        public final int chargeSeconds;    // -1 if absent or none planned
+        public final int maxPowerKw;       // field 2 W / 1000; -1 if absent
         /** Address contains a known DC fast-charging network name. */
         public final boolean networkMatch;
         /** Hash of the address (in memory only); 0 if no address. */
         public final int key;
 
-        public Destination(int index, boolean hasStation, int connectorCount,
-                int availableCount, int maxPowerKw, boolean networkMatch,
+        public Destination(int index, boolean hasStation, int departureWh,
+                int chargeSeconds, int maxPowerKw, boolean networkMatch,
                 int key) {
             this.index = index;
             this.hasStation = hasStation;
-            this.connectorCount = connectorCount;
-            this.availableCount = availableCount;
+            this.departureWh = departureWh;
+            this.chargeSeconds = chargeSeconds;
             this.maxPowerKw = maxPowerKw;
             this.networkMatch = networkMatch;
             this.key = key;
@@ -152,7 +159,7 @@ public final class NavProto {
     private static Destination parseDestination(Reader r, int index)
             throws ParseException {
         boolean station = false;
-        int conn = -1, avail = -1, kw = -1;
+        int dep = -1, secs = -1, kw = -1;
         boolean network = false;
         int key = 0;
         while (r.more()) {
@@ -176,11 +183,13 @@ public final class NavProto {
                 while (c.more()) {
                     int t = c.tag();
                     if (t == ((1 << 3) | 0)) {
-                        conn = (int) c.varint();
+                        dep = (int) c.varint();
                     } else if (t == ((2 << 3) | 0)) {
-                        avail = (int) c.varint();
+                        long w = c.varint();
+                        kw = w > 0 && w < 10000000L ? (int) ((w + 500) / 1000) : -1;
                     } else if (t == ((3 << 3) | 0)) {
-                        kw = (int) c.varint();
+                        long v = c.varint();  // int64: -1 = none planned
+                        secs = v >= 0 && v < Integer.MAX_VALUE ? (int) v : -1;
                     } else {
                         c.skip(t);
                     }
@@ -189,7 +198,7 @@ public final class NavProto {
                 r.skip(tag);
             }
         }
-        return new Destination(index, station, conn, avail, kw, network, key);
+        return new Destination(index, station, dep, secs, kw, network, key);
     }
 
     /** 0x8007 NextTurnDistanceEvent body: field 2 entries. */
