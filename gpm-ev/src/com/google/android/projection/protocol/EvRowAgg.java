@@ -12,10 +12,14 @@ package com.google.android.projection.protocol;
  * The energy signal is coarse (2 Wh steps, updated about once a second and
  * often in bigger jumps), so single-row power is noisy; average over a few
  * rows, or difference energy_wh over longer windows, for analysis.
+ * The first row of a file has no power: right after the head unit wakes the
+ * first energy samples can be stale (seen on the car: a 36 Wh step within
+ * 2 s, i.e. a bogus -65 kW), and there is no previous row to measure from.
  */
 final class EvRowAgg {
     private long refT = -1;
     private int refE = -1;
+    private boolean refFromPreviousRow;
     private long lastT = -1;
     private int lastE = -1;
     private int samples;
@@ -28,6 +32,7 @@ final class EvRowAgg {
     void reset() {
         refT = -1;
         refE = -1;
+        refFromPreviousRow = false;
         lastT = -1;
         lastE = -1;
         clearPeriod();
@@ -85,7 +90,7 @@ final class EvRowAgg {
 
     /** Battery power over the period in W (+ = charging), NaN if unknown. */
     float powerW(int whPerUnit) {
-        if (refE <= 0 || lastE <= 0 || lastT <= refT) {
+        if (!refFromPreviousRow || refE <= 0 || lastE <= 0 || lastT <= refT) {
             return Float.NaN;
         }
         return (float) ((double) (lastE - refE) * whPerUnit * 3600000.0
@@ -97,6 +102,7 @@ final class EvRowAgg {
         if (lastE > 0) {
             refT = lastT;
             refE = lastE;
+            refFromPreviousRow = true;
         }
         lastT = -1;
         lastE = -1;

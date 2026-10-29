@@ -48,8 +48,9 @@ public final class EvLogTest {
         for (int i = 0; i < 5; i++) {
             a.add(i * 1000L, e[i], v[i]);
         }
-        // -20 Wh over 4 s = -18000 W (discharge is negative)
-        check("power over first period", near(a.powerW(2), -18000f, 0.5f));
+        // first row of a file: no power (stale samples right after wake;
+        // the car showed a bogus -65 kW here)
+        check("first row of a file: no power", Float.isNaN(a.powerW(2)));
         check("speed avg of valid samples", near(a.speedAvg(), 65f, 1e-4f));
         check("speed max", near(a.speedMax(), 80f, 0f));
         check("speed last", near(a.speedLast(), 80f, 0f));
@@ -62,6 +63,8 @@ public final class EvLogTest {
         check("no energy: no power", Float.isNaN(a.powerW(2)));
         check("standstill speed 0", near(a.speedMax(), 0f, 0f));
         a.endPeriod();
+        // the reference is the last sample of the previous row with energy:
+        // -20 Wh between t=0 and t=4 s was row 1, row 3 measures from t=4 s
         // period 3: charging, 9990 -> 10040 raw at t=14 s: +100 Wh over 10 s
         // since the last valid sample (t=4 s) = +36000 W
         for (int i = 10; i < 15; i++) {
@@ -73,6 +76,13 @@ public final class EvLogTest {
         a.reset();
         a.add(0, 5000, 10);
         check("single sample: no power", Float.isNaN(a.powerW(2)));
+        // row 2 of a file: 5000 -> 4990 raw (-20 Wh) over 4 s = -18000 W
+        a.endPeriod();
+        for (int i = 1; i <= 4; i++) {
+            a.add(i * 1000L, i == 4 ? 4990 : 5000 - i, 0f);
+        }
+        check("row 2: power from the previous row's last sample",
+                near(a.powerW(2), -18000f, 0.5f));
         check("rounding", EvDriveLog.round1(12.345f).floatValue() == 12.3f
                 && EvDriveLog.round1(Float.NaN) == null);
     }
