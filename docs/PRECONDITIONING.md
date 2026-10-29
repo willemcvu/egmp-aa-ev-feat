@@ -106,12 +106,9 @@ P (0x8007):
 
 So **distance and time are solved**. The only unknown is whether `destinations[n].charging_station` is present when Maps routes to a charger. It's a dedicated field with charger-specific contents (port counts, kW), which strongly suggests Gearhead fills it from Maps' EV routing. That still needs to be seen.
 
-### Fallbacks if Maps doesn't set `charging_station`
+### Fallbacks
 
-1. **Name match on `destinations[].address`** for network names (Electrify America, EVgo, Tesla Supercharger, ChargePoint, IONNA…). Weak, but Maps usually puts the place name there for POIs.
-2. **Only when our EV model is active**: Maps-added charging stops are by definition chargers. If `destinations[]` grows an extra entry that we didn't see before routing started, that's a charging stop. Heuristic.
-3. **0x8008**, as above. A bigger project.
-4. Semi-automatic: a confirm prompt ("Precondition for this stop?") on the head unit when a fallback rule matches.
+Not needed: Test 1 showed Maps marks charging stops itself. Name matching on destination addresses was considered and rejected (too unreliable); it is not implemented.
 
 ## 3. Design (implemented, see [Implementation](#implementation))
 
