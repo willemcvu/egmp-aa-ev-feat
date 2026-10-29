@@ -86,7 +86,7 @@ public final class EvDriveLog {
     private static final int VCMS_INVALID = 0x7fff;
 
     // Column order of this writer. Every name must be on the format's
-    // allowlist (site/schema.json); empty = unknown.
+    // allowlist (tools/evlog_schema.json); empty = unknown.
     static final String[] COLUMNS = {
         // v1
         "t_s", "soc_half_pct", "energy_wh", "capacity_wh", "avlbl_enrg_raw",

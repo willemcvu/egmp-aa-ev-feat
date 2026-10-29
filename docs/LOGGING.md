@@ -1,8 +1,8 @@
 # EV log format v2
 
-The format the head unit writes for [ROADMAP item 2](ROADMAP.md#2-ev-logging-for-model-calibration), and that owners check, clean and submit through the [checker page](https://willemcvu.github.io/egmp-aa-ev-feat/) (`site/`) or `tools/evlog.py`. EV logs cover driving **and** charging: the head unit logs whenever it is on, with or without Android Auto.
+The format the head unit writes for [ROADMAP item 2](ROADMAP.md#2-ev-logging-for-model-calibration), and that owners submit as a GitHub issue ([EV log submission](https://github.com/willemcvu/egmp-aa-ev-feat/issues/new?template=log-submission.yml), label `ev-log`). `tools/evlog.py` checks, cleans and merges them. EV logs cover driving **and** charging: the head unit logs whenever it is on, with or without Android Auto.
 
-The allowlist of header keys and columns is single-sourced in [`site/schema.json`](../site/schema.json). `tools/evlog.py` and the page (`site/evlog.js`) both load it and produce byte-identical cleaned files. To add a field, add it to `schema.json` (and here); old parsers keep working because unknown columns are ignored.
+The allowlist of header keys and columns is in [`tools/evlog_schema.json`](../tools/evlog_schema.json), loaded by `tools/evlog.py`. To add a field, add it there (and here); old parsers keep working because unknown columns are ignored.
 
 v2 is a superset of v1: same header keys plus `sample_s`, same columns plus the ones marked *v2* below. Readers accept both (`accept_magic` in `schema.json`); a cleaned file keeps its own magic line.
 
@@ -38,7 +38,7 @@ t_s,soc_half_pct,energy_wh,capacity_wh,avlbl_enrg_raw,...
 5,120,39734,63200,19867,...
 ```
 
-Full example: [`site/sample.csv`](../site/sample.csv) (synthetic).
+Full example: [`tools/testdata/sample-ev-log.csv`](../tools/testdata/sample-ev-log.csv) (synthetic).
 
 ## Header
 
@@ -60,7 +60,7 @@ There is deliberately no time zone or time of day. `vin_model` is left out if th
 
 ## Data
 
-After the header: one CSV row of column names, then one row per period. Units are in the column names. Values are numbers (plain decimal; `int` and `0/1` columns as noted), except `model_rev`, a short lower-case hex string. **An empty field means unknown** (not read, invalid, or not applicable, e.g. `road_a_n` outside Android Auto). Columns may appear in any order in a raw log; cleaned logs use the order below (the `site/schema.json` order), which is also the logger's order. The last group (`pack_max_c` … `charge_kw`) is reserved: no source on this car yet.
+After the header: one CSV row of column names, then one row per period. Units are in the column names. Values are numbers (plain decimal; `int` and `0/1` columns as noted), except `model_rev`, a short lower-case hex string. **An empty field means unknown** (not read, invalid, or not applicable, e.g. `road_a_n` outside Android Auto). Columns may appear in any order in a raw log; cleaned logs use the order below (the `tools/evlog_schema.json` order), which is also the logger's order. The last group (`pack_max_c` … `charge_kw`) is reserved: no source on this car yet.
 
 Raw columns (`_raw`) are logged as the car reports them where the unit isn't proven.
 
@@ -156,7 +156,7 @@ Readers must be forward compatible:
 
 ## Cleaning rules
 
-`evlog.py clean` and the checker page apply exactly these, and write the result deterministically (cleaning a clean file changes nothing):
+`evlog.py clean` applies exactly these, and write the result deterministically (cleaning a clean file changes nothing):
 
 1. Header: keep the magic line (v1 or v2) as it is; keep only allowlisted keys whose value matches the key's pattern/number type (`schema.json`); drop free-text comment lines, unknown keys, invalid values and duplicates (first wins). Write kept keys in schema order.
 2. Columns: keep only allowlisted columns (first of any duplicate), in schema order.
@@ -172,9 +172,9 @@ python3 tools/evlog.py check FILE...       # summary + what clean would remove
 python3 tools/evlog.py clean IN OUT        # allowlist filter
 python3 tools/evlog.py merge DIR OUT.csv   # every *.csv in DIR, cleaned, as one table:
                                            # session id + header fields + columns
-sh tools/test_evlog.sh                     # tests (compares evlog.js with evlog.py if node exists)
+sh tools/test_evlog.sh                     # tests
 ```
 
 `merge` uses the file name as the session id when it follows the naming pattern, otherwise `session<N>`.
 
-The checker page is `site/` (static, no build step), published to GitHub Pages by `.github/workflows/pages.yml`. Try it locally with `python3 -m http.server -d site`. Its "Submit on GitHub" button opens `.github/ISSUE_TEMPLATE/log-submission.yml` with the car, software and file summaries filled in; the user attaches the cleaned files to the (public) issue.
+Owners submit logs through the issue form `.github/ISSUE_TEMPLATE/log-submission.yml` ([open one](https://github.com/willemcvu/egmp-aa-ev-feat/issues/new?template=log-submission.yml)), attaching the files from the drive as they are; the issue is public. The logger only writes allowlisted fields, so cleaning is a check on submissions rather than a step owners need.

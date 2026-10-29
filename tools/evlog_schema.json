@@ -6,7 +6,7 @@
     "# egmp-aa-ev-log v1",
     "# egmp-aa-ev-log v2"
   ],
-  "comment": "Single source of the EV-log allowlist. Read by tools/evlog.py and site/evlog.js. Anything not listed here is dropped by the cleaners. A file must start with one of accept_magic (v2 is a superset of v1); a cleaned file keeps its own magic line. Order here is the cleaned output order (matches the on-car logger's order). Column types: number, int, bool (0/1), string (must have a pattern). Patterns must be valid in both Python re and JavaScript RegExp (keep to anchors, classes and quantifiers).",
+  "comment": "Single source of the EV-log allowlist. Read by tools/evlog.py. Anything not listed here is dropped by the cleaner. A file must start with one of accept_magic (v2 is a superset of v1); a cleaned file keeps its own magic line. Order here is the cleaned output order (matches the on-car logger's order). Column types: number, int, bool (0/1), string (must have a pattern). Patterns are Python re.",
   "number_pattern": "^-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?$",
   "header": [
     {

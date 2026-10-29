@@ -52,10 +52,10 @@ public final class SenderRowTest {
             throw new AssertionError("duplicate column");
         }
         pass++;
-        // every column is on the allowlist (site/schema.json), in its order,
+        // every column is on the allowlist (tools/evlog_schema.json), in its order,
         // so cleaned files keep the writer's order
         String schema = new String(java.nio.file.Files.readAllBytes(
-                java.nio.file.Paths.get("../site/schema.json")), "UTF-8");
+                java.nio.file.Paths.get("../tools/evlog_schema.json")), "UTF-8");
         java.util.List<String> allow = new java.util.ArrayList<String>();
         java.util.regex.Matcher m = java.util.regex.Pattern
                 .compile("\"name\": \"([a-z0-9_]+)\"").matcher(schema);

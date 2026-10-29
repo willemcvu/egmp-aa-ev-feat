@@ -1,6 +1,6 @@
 #!/bin/sh
-# Tests for tools/evlog.py (and site/evlog.js when node is installed):
-# check/clean on site/sample.csv and on a dirty variant with private data
+# Tests for tools/evlog.py:
+# check/clean on tools/testdata/sample-ev-log.csv and on a dirty variant with private data
 # that must be removed. Run from anywhere: sh tools/test_evlog.sh
 set -eu
 cd "$(dirname "$0")/.."
@@ -12,11 +12,11 @@ VIN=KM8KRDAF5NU012345
 ADDR="1600 Amphitheatre Pkwy, Mountain View"
 
 # 1. The sample is clean: check exits 0, clean is a byte-for-byte no-op.
-$PY tools/evlog.py check site/sample.csv > "$T/check1.txt" || fail "sample check exit $?"
+$PY tools/evlog.py check tools/testdata/sample-ev-log.csv > "$T/check1.txt" || fail "sample check exit $?"
 grep -q "OK: nothing to remove" "$T/check1.txt" || fail "sample not reported clean"
 grep -q "Ioniq 5 2022" "$T/check1.txt" || fail "sample summary"
-$PY tools/evlog.py clean site/sample.csv "$T/sample.clean.csv" > /dev/null
-cmp -s site/sample.csv "$T/sample.clean.csv" || fail "cleaning the sample changed it"
+$PY tools/evlog.py clean tools/testdata/sample-ev-log.csv "$T/sample.clean.csv" > /dev/null
+cmp -s tools/testdata/sample-ev-log.csv "$T/sample.clean.csv" || fail "cleaning the sample changed it"
 
 # 2. Dirty variant: full VIN, unknown header keys, free-text comment, a lat/lon
 #    column, an address in a numeric column, a non-numeric t_s, a time going
@@ -24,7 +24,7 @@ cmp -s site/sample.csv "$T/sample.clean.csv" || fail "cleaning the sample change
 $PY - "$VIN" "$ADDR" > "$T/dirty.csv" <<'EOF'
 import sys
 vin, addr = sys.argv[1], sys.argv[2]
-lines = open("site/sample.csv").read().splitlines()
+lines = open("tools/testdata/sample-ev-log.csv").read().splitlines()
 h = next(i for i, l in enumerate(lines) if not l.startswith("#"))  # column row
 out = [lines[0], "# vin=" + vin, "# vin_model=" + vin, "# dest=" + addr,
        "# trip to grandma's house"] + [l for l in lines[1:h] if "vin_model" not in l]
@@ -93,7 +93,7 @@ set -e
 
 # 4. merge
 mkdir "$T/logs"
-cp site/sample.csv "$T/logs/egmp-NEEV-20260117-001.csv"
+cp tools/testdata/sample-ev-log.csv "$T/logs/egmp-NEEV-20260117-001.csv"
 cp "$T/dirty.csv" "$T/logs/Trip to 1600 Amphitheatre.csv"
 $PY tools/evlog.py merge "$T/logs" "$T/merged.csv" > /dev/null
 [ "$(wc -l < "$T/merged.csv")" = 40 ] || fail "merged row count $(wc -l < "$T/merged.csv")"
@@ -102,20 +102,5 @@ grep -q "^egmp-NEEV-20260117-001," "$T/merged.csv" || fail "session id from stan
 grep -q "^session1," "$T/merged.csv" || fail "session id for nonstandard name"
 ! grep -qE "Amphitheatre|lat|$VIN" "$T/merged.csv" || fail "merged file leaks"
 
-# 5. The website's cleaner (site/evlog.js) must give byte-identical output.
-if command -v node > /dev/null 2>&1; then
-  for f in site/sample.csv "$T/dirty.csv" "$T/v1.csv"; do
-    node -e '
-      const fs = require("fs"), E = require(process.argv[1]);
-      const s = E.prepareSchema(JSON.parse(fs.readFileSync(process.argv[2], "utf8")));
-      process.stdout.write(E.serialize(s, E.parse(s, fs.readFileSync(process.argv[3], "utf8"))));
-    ' "$PWD/site/evlog.js" site/schema.json "$f" > "$T/js.csv"
-    $PY tools/evlog.py clean "$f" "$T/py.csv" > /dev/null
-    cmp -s "$T/js.csv" "$T/py.csv" || { diff "$T/py.csv" "$T/js.csv" | head; fail "evlog.js differs from evlog.py on $f"; }
-  done
-  echo "evlog.js matches evlog.py"
-else
-  echo "node not found: skipped evlog.js comparison"
-fi
 
 echo "PASS"

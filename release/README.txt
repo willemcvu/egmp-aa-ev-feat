@@ -12,8 +12,8 @@ Makes Google Maps on Android Auto treat the car as an EV:
 - EV logs: one small file each time the head unit is on, driving or
   charging (battery, speed, temperatures, climate, charging, model values;
   no location, no full VIN, no times of day), copied to a USB
-  drive that has a folder named egmp-aa-ev-logs. Check them and share them
-  at https://willemcvu.github.io/egmp-aa-ev-feat/
+  drive that has a folder named egmp-aa-ev-logs. Share them by opening an
+  "EV log submission" issue on the GitHub page above.
 
 WARNING: this modifies the infotainment system's files. It checks every file
 before changing anything and keeps a backup for uninstall, but you use it at

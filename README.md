@@ -8,7 +8,8 @@ Real EV routing in Google Maps on Android Auto for the Hyundai Ioniq 5's Gen5W h
 ## Requirements
 
 - Hyundai Ioniq 5 (US), Gen5W software `NEEV.USA.0000.V015.012.260507`
-- NEMESIS and HMG Leafia Plus **v1.0.5** (the installer refuses anything else and changes nothing)
+- [NEMESIS](https://github.com/xwtk/hmg_nemesis) installed
+- **[HMG Leafia Plus](https://github.com/VysseCodes/HMG-Leafia-Plus) v1.0.5 installed first.** This package builds on Leafia's modified Android Auto files; without exactly v1.0.5 the installer refuses and changes nothing.
 
 ## Features
 
@@ -17,7 +18,7 @@ Real EV routing in Google Maps on Android Auto for the Hyundai Ioniq 5's Gen5W h
 - **Cold weather:** live outside temperature raises heating and rolling losses in the model.
 - **Charge times:** calibrated on real DC sessions and the car's own estimate, including the slow last 10–20 %.
 - **Preconditioning:** when the next stop is a charger over 50 kW within an hour, the car is asked to warm the battery. Turn it off with the car's own *battery conditioning* setting.
-- **EV logs:** driving and charging, whenever the head unit is on; copied to any USB drive with an `egmp-aa-ev-logs` folder; check and share them on the [EV log checker](https://willemcvu.github.io/egmp-aa-ev-feat/).
+- **EV logs:** driving and charging, whenever the head unit is on; copied to any USB drive with an `egmp-aa-ev-logs` folder; share them through an [EV log issue](https://github.com/willemcvu/egmp-aa-ev-feat/issues/new?template=log-submission.yml).
 
 ## Install
 

@@ -5,8 +5,7 @@
     python3 tools/evlog.py clean IN OUT       allowlist filter, deterministic rewrite
     python3 tools/evlog.py merge DIR OUT.csv  clean every *.csv in DIR into one table
 
-The allowlist lives in site/schema.json (shared with the website's site/evlog.js;
-both must produce byte-identical cleaned output). Standard library only.
+The allowlist lives in tools/evlog_schema.json. Standard library only.
 
 check exit status: 0 clean, 1 cleaning would remove something, 2 unusable.
 """
@@ -15,7 +14,7 @@ import os
 import re
 import sys
 
-SCHEMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "site", "schema.json")
+SCHEMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "evlog_schema.json")
 NAME_RE = re.compile(r"^egmp-[A-Za-z0-9]+-[0-9]{8}-([0-9]+)\.csv$")
 INT_RE = re.compile(r"^-?[0-9]+$")
 BOOL_RE = re.compile(r"^[01]$")
@@ -45,7 +44,7 @@ def load_schema(path=SCHEMA_PATH):
 
 
 def split_csv(line):
-    """Split one CSV line (RFC 4180 quoting, no embedded newlines). Same as evlog.js."""
+    """Split one CSV line (RFC 4180 quoting, no embedded newlines)."""
     out, cur, i, n, q = [], [], 0, len(line), False
     while i < n:
         ch = line[i]

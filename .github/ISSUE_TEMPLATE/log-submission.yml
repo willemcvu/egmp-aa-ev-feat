@@ -6,9 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks! Check and clean your logs first on the [checker page](https://willemcvu.github.io/egmp-aa-ev-feat/) (runs in your browser, nothing is uploaded) or with `python3 tools/evlog.py clean IN OUT`.
+        Thanks! Attach the `egmp-*.csv` files from the `egmp-aa-ev-logs` folder on your USB drive as they are. The head unit only records technical data (no location, no full VIN, no times of day).
 
-        **This issue and its attachments are public.** Attach only cleaned `egmp-*.csv` files, and don't write anything here you wouldn't post publicly (no full VIN, no places).
+        **This issue and its attachments are public.** Don't write anything here you wouldn't post publicly (no full VIN, no places).
   - type: dropdown
     id: car
     attributes:
@@ -33,14 +33,9 @@ body:
     id: product
     attributes:
       label: Head unit software
-      description: The `product` line of the log header (the checker shows it), e.g. `NEEV.USA.0000.V015.012.260507`.
+      description: The `product` line at the top of a log file, e.g. `NEEV.USA.0000.V015.012.260507`.
     validations:
       required: true
-  - type: textarea
-    id: sessions
-    attributes:
-      label: Sessions
-      description: Filled in by the checker page, one line per file. Fine to leave as is.
   - type: textarea
     id: battery
     attributes:
@@ -64,5 +59,5 @@ body:
     attributes:
       label: Confirmation
       options:
-        - label: The attached files are cleaned logs from the checker page or `tools/evlog.py clean`, and I'm fine with them being public.
+        - label: The attached files are unedited logs from the head unit, and I'm fine with them being public.
           required: true
