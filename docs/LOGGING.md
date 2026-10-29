@@ -68,6 +68,15 @@ After the header: one CSV row of column names, then one row per sample. Units ar
 | `batt_v`, `batt_a`, `batt_kw` | number | HV battery voltage, current, power |
 | `hvac_w` | number | climate power, W |
 | `hvac_raw` | number | climate power or state, raw |
+| `trip_batt_raw` | int | HEV 0x58 battery energy used this drive, 0.1 kWh (resets each drive) |
+| `trip_clim_raw` | int | HEV 0x42 climate energy this drive, raw (Wh inferred) |
+| `trip_ldc_raw` | int | HEV 0x49 12 V / electronics energy this drive, raw |
+| `trip_bheat_raw` | int | HEV 0x44 battery heater energy this drive, raw |
+| `trip_mot1_raw` | int | HEV 0x47 front motor drive energy this drive, raw |
+| `trip_mot2_raw` | int | HEV 0x48 rear motor drive energy this drive, raw |
+| `trip_gen1_raw` | int | HEV 0x59 front motor regen energy this drive, raw |
+| `trip_gen2_raw` | int | HEV 0x5a rear motor regen energy this drive, raw |
+| `charge_state_raw` | int | HEV 0x07 charge state, raw (3 = not charging) |
 | `charging` | 0/1 | charging |
 | `charge_kw` | number | charging power, kW |
 | `drive_mode_raw` | int | drive mode, raw |

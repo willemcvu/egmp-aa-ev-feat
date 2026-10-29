@@ -37,7 +37,11 @@ final class EvLogger {
     static final String[] COLUMNS = {
         "t_s", "soc_half_pct", "energy_wh", "capacity_wh", "avlbl_enrg_raw",
         "out_temp_raw", "out_temp_c", "pack_min_c", "dte_raw", "road_a_n",
-        "aux_table_c", "soh_raw", "model_rev",
+        "aux_table_c", "soh_raw", "model_rev", "speed_kph", "odo_delta_km",
+        "trip_batt_raw", "trip_clim_raw", "trip_ldc_raw", "trip_bheat_raw",
+        "trip_mot1_raw", "trip_mot2_raw", "trip_gen1_raw", "trip_gen2_raw",
+        "hvac_raw", "charge_state_raw", "nav_active", "nav_rem_m", "nav_rem_s",
+        "nav_charger", "nav_charger_kw", "precond_state",
     };
 
     private static FileOutputStream sOut;
@@ -128,6 +132,7 @@ final class EvLogger {
         h.append("# egmp-aa-ev-log v1\n");
         header(h, "product", product);
         header(h, "device", Build.DEVICE);
+        header(h, "vin_model", EvModelSender.vinModel());
         header(h, "pkg", PKG);
         header(h, "model_capacity_wh", String.valueOf(EvModelTemplate.CAPACITY_WH));
         header(h, "capacity_source", EvModelSender.capacitySource());

@@ -1,6 +1,6 @@
 # Automatic battery preconditioning from Google Maps (Android Auto)
 
-Date: 2026-10-28. Research only: nothing here has been built or installed. Car: 2022 Ioniq 5, Gen5W `NEEV.USA.0000.V015.012.260507`, NEMESIS + Leafia v1.0.5 + our EV-model patch (`HANDOFF.md`).
+Date: 2026-10-28 (research); implementation 2026-10-29, built and host-tested, **not yet run on the car** (see [Implementation](#implementation)). Car: 2022 Ioniq 5, Gen5W `NEEV.USA.0000.V015.012.260507`, NEMESIS + Leafia v1.0.5 + our EV-model patch (`HANDOFF.md`).
 
 Goal: when Google Maps on Android Auto is guiding to a DC fast charger (the destination, or a charging stop Maps added), the car preconditions the battery the way it does for its own navigation. No buttons.
 
@@ -113,7 +113,7 @@ So **distance and time are solved**. The only unknown is whether `destinations[n
 3. **0x8008**, as above. A bigger project.
 4. Semi-automatic: a confirm prompt ("Precondition for this stop?") on the head unit when a fallback rule matches.
 
-## 3. Proposed design (not built)
+## 3. Design (implemented, see [Implementation](#implementation))
 
 Java only, in GPM, on top of the dex the EV-model patch already replaces. No native change.
 
@@ -125,11 +125,73 @@ Java only, in GPM, on top of the dex the EV-model patch already replaces. No nat
   - Maintain every 5 s: `65(km)`, `66(min)` from live 0x8007 values (clamp to 0..2046 / 0..1022).
   - Cancel `65(2047)`, `66(1023)`, `62(0,0)` on: route cancelled/INACTIVE, destination no longer a charger, rerouted away, arrival (distance < ~200 m), AA disconnect, GPM shutdown, off switch.
   - Keep the manual app's safety rules: write ownership to disk before the first command, cancel on recovery after a crash (never start), and treat only BCM indicator 1 as "Active".
-- **Off switch:** `persist.gpm.precond.off=1`, like `persist.gpm.ev.off`.
+- **Switch:** `persist.gpm.precond` (default off; see [Implementation](#implementation)).
 - **Don't fight other writers:** native nav (not guiding while AA guides, but `isGpmNaviGuidance()` is the flag it checks) and the manual Launchpad app. If the indicator is already Active and we didn't start it, stay hands-off.
 - **Packaging:** same pipeline and md5 gating as `packages/aa-ev-model/` (both features replace GPM `classes.dex`). Ship as one package, or rebuild the EV-model one with both.
 
 Risk: same class as the EV-model patch. If GPM throws, AA stops working, and uninstall restores Leafia's files. The only new car-facing action is the three HEV calls the manual app and the car's nav already make, which ask the BMS rather than override it.
+
+## Implementation
+
+Built 2026-10-29 into the same GPM `classes.dex` as the EV-model patch (`tools/build_all.sh`). Host-tested only.
+
+**Code** (`gpm-ev/src/com/google/android/projection/protocol/`):
+
+- `NavProto`: minimal protobuf reader for the `S` (0x8006) and `P` (0x8007) NAVDUMP strings. Returns destinations (index, charging_station present, connector/available counts, `max_power_kw`, a DC network name match) and per-destination {metres, seconds}. Rejects truncated payloads (declared length must match the hex). Addresses are never stored or logged. Only a hash is kept in memory, as the stop's identity.
+- `PrecondCore`: the decision logic, pure Java, with the car, journal and log behind interfaces.
+- `Precond`: Android shell. One `HandlerThread` (`EvPrecond`), binder access (Launchpad's `OemVehicleClient` checks, Ioniq 5 NEEV profile only: `Build.DEVICE` + SHA-256 of `automotive.odex` / `automotive-service.odex`, which match our `private/car-neev-260507` copies), the ownership journal `files/evprecond.owned` in GPM's data dir, and static getters (`navActive()`, `remainingMeters()`, `remainingSeconds()`, `isCharger()`, `chargerKw()`, `state()`/`stateName()`) for a logger.
+
+**Hooks** (`tools/patch_gpm_smali.py`; every call is wrapped in a catch-all, so a Precond failure can't break navigation):
+
+| Where | Call | Why |
+|---|---|---|
+| `GpmNaviTBTManager.<init>(Context)` | `Precond.onSessionStart(ctx)` | starts the thread at each AA session; a stale journal is cancelled here |
+| `GpmNaviTBTManager.onNextTurn`, type 0x21 branch | `Precond.onNavDump(p1)` | before Leafia's `NAVDUMP` log + return; payload is parsed on our thread |
+| `GpmNaviTBTManager.onStatus(I)` | `Precond.onNavStatus(p1)` | 1 ACTIVE / 3 REROUTING = guiding; anything else ends the route |
+| `GpmNaviTBTManager.destroy()` | `Precond.stop()` | only caller is `GalConnectionSession.clearSession()` (AA session teardown). `stop()` is not used: `GalConnectionSession$6` calls it on focus changes too |
+| `SensorSource.shutdown()` | `Precond.stop()` | second teardown path (GAL shutdown), after the existing `EvModelSender.stop()` |
+
+`persist.gpm.ev.off` does not affect preconditioning. It has its own switch.
+
+**Switch `persist.gpm.precond`** (read every 5 s while guiding):
+
+| Value | Behaviour |
+|---|---|
+| `0` / unset (default) | Parse and expose nav data, log destination summaries. **No vehicle reads or commands.** The one exception: a stale journal from an earlier `1`/`2` run is cancelled (Cancel only). |
+| `1` | On: targets need `charging_station` with `max_power_kw >= 50` |
+| `2` | On, plus fallback: a destination with no station data whose address contains Electrify America, EVgo, IONNA, Tesla Supercharger, ChargePoint, Walmart or Mercedes-Benz High-Power counts as a 150 kW charger |
+
+Switching to `0` while a request is live cancels it.
+
+**Rules** (constants in `PrecondCore`):
+
+- Target: the first destination that qualifies, with distance/time from the same index in 0x8007. An `S` with no destinations keeps the last list.
+- Start once when guiding, target present, remaining time <= 60 min, remaining distance >= 200 m, flag 94 == 2, flag 44 == 1, BCM 109 == 0, and the firmware matches. The journal is written (fsync) first; if it can't be written, there's no Start.
+- Maintain every 5 s with live km/min (rounded, clamped 0..2046 / 0..1022). Never resend 62.
+- Cancel on: route inactive, target gone or no longer a >= 50 kW charger, arrival (< 200 m), AA session end, GPM GAL shutdown, switch to 0, no Active within 5 min of Start, READY lost, setting disabled, or car Active -> Off.
+- After arrival, timeout or car-side end, that stop is latched (no restart) until the route ends or the target changes. At most 3 Starts per route (protects against a target flickering in and out).
+- If the indicator is already Active and we didn't start it: hands off.
+- After Cancel, the journal is kept until BCM reads Off (or 60 s pass). A failed Cancel is retried 12 times, 5 s apart. If it still fails, the journal stays and the next session cancels again.
+
+**States** (`Precond.state()`): 0 OFF, 1 IDLE, 2 WAITING, 3 REQUESTED, 4 ACTIVE, 5 CANCELLING, 6 DONE, 7 HANDS_OFF, 8 ERROR.
+
+**Log** (`adb logcat -s EvPrecond`): `started, mode N`; `nav active (1)`; `dests n=2 [0: -] [1: station kw=150 6/8]`; `target: stop #1, 150 kW`; `waiting: <reason>`; `start: 30 km, 20 min, 150 kW`; `car reports conditioning Active`; `cancel: <reason>`; `cancel confirmed: car reports Off`; `state A -> B`. No addresses.
+
+**Tests:** `sh gpm-ev/test/run.sh` (JVM, fake vehicle/journal; `VERBOSE=1` prints the log). 95 checks:
+
+- NavProto on the real 0x8007 payload, and on the real 0x8006 payload with its place names replaced by same-length placeholders. Non-charger: never starts.
+- Synthetic charger routes: start profile exact; maintain without 62; cancel on arrival, route end, session end, target -> non-charger or L2, 5-minute timeout, READY lost, setting disabled, Active -> Off, switch off.
+- Rerouting keeps the request. Multi-stop picks the right index. Window, hands-off, firmware mismatch and journal failure each block Start. Stale journal cancels only, in every mode. Failed cancel is retried. Start churn is capped.
+
+**Verified:** host logic, the build, and that the package sandbox test still passes.
+
+**Not verified:**
+
+- whether Maps fills `charging_station` at all (Test 1);
+- whether 0x8007 field 2 has one entry per 0x8006 destination, in order;
+- whether NAVDUMP passes long payloads intact (a truncated one is logged once and ignored);
+- the 62/65/66 profile on this Ioniq 5 (Launchpad's field tests were on an EV6);
+- the hooks running on the car (dexopt verification, threads).
 
 ## 4. Tests
 
@@ -156,7 +218,15 @@ Run the manual Launchpad app once, cold battery, and confirm the indicator goes 
 
 ### Test 3: automatic mode (after building)
 
-Parked first: route to a DC charger, check logcat for the start/maintain/cancel sequence and the BCM indicator, then cancel the route and confirm the car reports Off. Then a real drive to a charger on a cold morning.
+Install the package built with this code (default switch 0). Phone Bluetooth off, `adb logcat -v time -s EvPrecond EvModelSender NAVDUMP` running before plugging in AA.
+
+1. **Passive (switch 0).** Plug in AA and route anywhere. Expect `started, mode 0`, `nav active (1)` and a `dests n=… [0: -]` line. There should be no `not parsed` line and no other EvPrecond output. AA and the cluster TBT should work as before. Then route to a DC charger: `dests … [0: station kw=… a/c]` answers Test 1 with no commands sent.
+2. **Active, parked, car in READY, battery conditioning enabled in EV settings.** `adb shell setprop persist.gpm.precond 1`, wait 5 s. Route to a DC charger less than 60 min away. Expect, in order: `target: stop #0, N kW`, `start: K km, M min, N kW`, `state WAITING -> REQUESTED`, then, if the BMS wants heat, `car reports conditioning Active` (`REQUESTED -> ACTIVE`, the car/Launchpad indicator on). A `waiting: …` line names the condition that is blocking Start.
+3. **Cancel paths.** End the route in Maps: `cancel: route ended`, then `cancel confirmed: car reports Off`. Repeat step 2 and unplug the phone: `cancel: session end`. Repeat and run `setprop persist.gpm.precond 0`: `cancel: switch off`. After each one, `/data/data/com.google.android.projection.sink/files/evprecond.owned` must be gone (`nemesis root -c 'ls …/files'`).
+4. **Never Active.** With a warm battery the car may not go Active. Expect `cancel: no Active within 5 min` 5 min after Start, and no further Start for that charger.
+5. **Drive.** A cold morning, real route to a DC charger 20–60 min away. Watch the indicator. On arrival (< 200 m) expect `cancel: arrived`.
+
+If anything goes wrong: `setprop persist.gpm.precond 0` (no reboot needed), or uninstall the package.
 
 ## Open questions
 

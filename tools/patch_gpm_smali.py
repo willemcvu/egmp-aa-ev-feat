@@ -14,6 +14,23 @@ the compiled EvModelSender/EvModelTemplate classes, and edits SensorSource.smali
      EvModelSender can queue a whole raw AA message (the patched library
      tail-branches it into ProtocolEndpointBase::queueOutgoing).
 
+  5. shutdown(): also stop Precond (cancel an owned preconditioning request).
+
+and GpmNaviTBTManager.smali (automatic battery preconditioning, see
+docs/PRECONDITIONING.md; every call wrapped in a catch-all so a Precond
+failure can never break navigation):
+
+  6. <init>(Context): Precond.onSessionStart(ctx) -- thread + stale-journal
+     recovery (cancel only).
+  7. onNextTurn(): Precond.onNavDump(p1) in the type 0x21 (NAVDUMP) branch,
+     before Leafia's log + return.
+  8. onStatus(I): Precond.onNavStatus(p1) on entry.
+  9. destroy(): Precond.stop() on entry (AA session teardown,
+     GalConnectionSession.clearSession()).
+
+The preconditioning hooks are not gated by persist.gpm.ev.off: Precond has
+its own switch, persist.gpm.precond (default 0 = parse only, no commands).
+
 GalReceiver.smali (which Leafia already patches) is not touched.
 
 Idempotent: re-running rebuilds the tree from scratch. Fails loudly if any
@@ -29,6 +46,8 @@ SRC_TREE = ROOT / "private/car-current-leafia105/smali-gpm"
 NEW_SMALI = ROOT / "gpm-ev/build/smali"
 BUILD_TREE = ROOT / "build/gpm-smali"
 SENSOR_SOURCE = "com/google/android/projection/protocol/SensorSource.smali"
+NAVI_TBT = "com/google/android/projection/sink/navigation/GpmNaviTBTManager.smali"
+PRECOND = "Lcom/google/android/projection/protocol/Precond;"
 
 MARK = "EV patch"
 
@@ -184,11 +203,93 @@ SENDRAW_METHOD = """\
 .method public shutdown()V
 """
 
+def guarded_call(label: str, invoke: str) -> str:
+    """A static call wrapped in a catch-all that swallows the exception.
+
+    Precond's entry points catch everything themselves; this also covers a
+    class that fails to load or verify, so navigation keeps working. Same
+    shape d8 emits for `try { f(); } catch (Throwable t) {}`. The handler
+    clobbers v0: every hook point below writes v0 before reading it.
+    """
+    return f"""\
+    # EV patch: automatic preconditioning hook
+    :try_start_{label}
+    {invoke}
+    :try_end_{label}
+    .catchall {{:try_start_{label} .. :try_end_{label}}} :catchall_{label}
+
+    goto :goto_{label}
+
+    :catchall_{label}
+    move-exception v0
+
+    :goto_{label}
+"""
+
+
+# --- Edit 5: stop Precond on GAL teardown too ------------------------------
+# Applied after edit 3, so the anchor is the line edit 3 added.
+SHUTDOWN_PRECOND_OLD = """\
+    invoke-static {}, Lcom/google/android/projection/protocol/EvModelSender;->stop()V
+"""
+SHUTDOWN_PRECOND_NEW = SHUTDOWN_PRECOND_OLD + "\n" + guarded_call(
+    "precond_shutdown", f"invoke-static {{}}, {PRECOND}->stop()V")
+
 EDITS = [
     ("init() fuel/connector arrays", INIT_ARRAYS_OLD, INIT_ARRAYS_NEW),
     ("init() register sensor 23 + start", REGISTER_OLD, REGISTER_NEW),
     ("shutdown() stop sender", SHUTDOWN_OLD, SHUTDOWN_NEW),
     ("sendRawMessage", SENDRAW_ANCHOR, SENDRAW_METHOD),
+    ("shutdown() stop precond", SHUTDOWN_PRECOND_OLD, SHUTDOWN_PRECOND_NEW),
+]
+
+
+# --- GpmNaviTBTManager: preconditioning hooks --------------------------------
+TBT_INIT_OLD = """\
+.method public constructor <init>(Landroid/content/Context;)V
+    .registers 4
+
+    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+"""
+TBT_INIT_NEW = TBT_INIT_OLD + "\n" + guarded_call(
+    "precond_init",
+    f"invoke-static {{p1}}, {PRECOND}->onSessionStart(Landroid/content/Context;)V")
+
+TBT_NAVDUMP_OLD = """\
+    const-string v0, "NAVDUMP"
+
+    invoke-static {v0, p1}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
+"""
+TBT_NAVDUMP_NEW = guarded_call(
+    "precond_dump",
+    f"invoke-static {{p1}}, {PRECOND}->onNavDump(Ljava/lang/String;)V") + "\n" + TBT_NAVDUMP_OLD
+
+TBT_STATUS_OLD = """\
+.method public onStatus(I)V
+    .registers 4
+
+"""
+TBT_STATUS_NEW = TBT_STATUS_OLD + guarded_call(
+    "precond_status", f"invoke-static {{p1}}, {PRECOND}->onNavStatus(I)V") + "\n"
+
+TBT_DESTROY_OLD = """\
+.method public destroy()V
+    .registers 3
+
+"""
+TBT_DESTROY_NEW = TBT_DESTROY_OLD + guarded_call(
+    "precond_stop", f"invoke-static {{}}, {PRECOND}->stop()V") + "\n"
+
+NAVI_EDITS = [
+    ("<init> precond session start", TBT_INIT_OLD, TBT_INIT_NEW),
+    ("onNextTurn NAVDUMP -> precond", TBT_NAVDUMP_OLD, TBT_NAVDUMP_NEW),
+    ("onStatus -> precond", TBT_STATUS_OLD, TBT_STATUS_NEW),
+    ("destroy -> precond stop", TBT_DESTROY_OLD, TBT_DESTROY_NEW),
+]
+
+FILE_EDITS = [
+    (SENSOR_SOURCE, EDITS),
+    (NAVI_TBT, NAVI_EDITS),
 ]
 
 
@@ -207,17 +308,18 @@ def main() -> int:
         installed.append(str(rel))
     print(f"installed {len(installed)} new classes: {installed}")
 
-    path = BUILD_TREE / SENSOR_SOURCE
-    text = path.read_text()
-    assert MARK not in text, "tree already patched?"
-    for name, old, new in EDITS:
-        count = text.count(old)
-        if count != 1:
-            print(f"FATAL: anchor for '{name}' found {count} times (want 1)")
-            return 1
-        text = text.replace(old, new)
-    path.write_text(text)
-    print(f"patched {SENSOR_SOURCE}: " + ", ".join(name for name, _, _ in EDITS))
+    for rel, edits in FILE_EDITS:
+        path = BUILD_TREE / rel
+        text = path.read_text()
+        assert MARK not in text, f"{rel} already patched?"
+        for name, old, new in edits:
+            count = text.count(old)
+            if count != 1:
+                print(f"FATAL: anchor for '{name}' found {count} times (want 1)")
+                return 1
+            text = text.replace(old, new)
+        path.write_text(text)
+        print(f"patched {rel}: " + ", ".join(name for name, _, _ in edits))
     return 0
 
 

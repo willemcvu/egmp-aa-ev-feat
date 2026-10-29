@@ -53,34 +53,60 @@ public final class EvModelSender {
             "com.hkmc.telematics.hscan.tm_interface.ITM_HSCANService";
     private static final int HCAN_TX_GET_SOH = 0xd6;  // getXEV_Bms_GDS_SOH
 
-    // Usable capacity is learned from the BMS available energy (nav packet
-    // EV_AVLBL_ENRG, 2 Wh steps like BMS_EVENERGYCAPA) divided by display
-    // SOC. 14462 at 46.0% on the owner's car = 28.9 kWh -> 62.9 kWh usable.
-    // Only learned at >= CAP_MIN_HALF_PCT, where SOC's 0.5% step costs
-    // < 2.5%; smoothed; kept across sessions in CAP_FILE.
+    // BMS remaining usable energy: HEV flag 0x31 ENERGYMAP_1000MS, the same
+    // signal as the nav packet's EV_AVLBL_ENRG (docs/DATA-SOURCES.md 1.1), in
+    // 2 Wh steps like BMS_EVENERGYCAPA; 0xFFFF = invalid. Usable capacity is
+    // learned as energy / display SOC: 14462 at 46.0% on the owner's car =
+    // 28.9 kWh -> ~62.9 kWh. Energy reaches 0 near display 2%, so low-SOC
+    // samples read a little low: samples at >= CAP_GOOD_HALF_PCT win, lower
+    // ones (>= CAP_MIN_HALF_PCT) only fill in until one exists. Smoothed;
+    // kept across sessions in CAP_FILE ("<Wh> <1 if good>").
+    private static final int HEV_FLAG_ENERGYMAP = 0x31;
     private static final int ENRG_WH_PER_UNIT = 2;
-    private static final int CAP_MIN_HALF_PCT = 40;      // 20% SOC
+    private static final int ENRG_INVALID = 0xffff;
+    private static final int CAP_MIN_HALF_PCT = 60;      // 30% SOC
+    private static final int CAP_GOOD_HALF_PCT = 120;    // 60% SOC
     private static final int CAP_MIN_WH = 30000;
     private static final int CAP_MAX_WH = 90000;
     private static final float CAP_ALPHA = 0.1f;         // EMA weight per sample
     private static final String CAP_FILE = "capacity_wh";
     private static float sCapacityEst = -1f;             // <0: none yet
+    private static boolean sCapacityGood;                // from >= 60% samples
     private static boolean sCapacityLoaded;
+    private static int sEnergyRaw = -1;                  // last valid 0x31 raw
+
+    // Logged-only HEV flags (raw; docs/DATA-SOURCES.md 1.2, 5, 6): trip sums
+    // reset each drive. Order = EvLogger columns trip_* / hvac_raw / charge.
+    private static final int[] LOG_FLAGS = {
+        0x58,  // XEV_BATPWRSUM_KWH     trip battery energy, 0.1 kWh
+        0x42,  // DATC_CLMTPWRSUM_W     trip climate energy
+        0x49,  // LDC_LOADPWRSUMVAL     trip 12 V / electronics energy
+        0x44,  // XEV_BATHEATPWRSUM_WH  trip battery heater energy
+        0x47,  // MCU_MG1MOTPOWER_WH    trip front motor drive energy
+        0x48,  // MCU_MG2MOTPOWER_WH    trip rear motor drive energy
+        0x59,  // MCU_MG1GENPOWER_WH    trip front regen energy
+        0x5a,  // MCU_MG2GENPOWER_WH    trip rear regen energy
+        0x4f,  // DATC_CLMTPWRCNSMPTN_W live climate power (~20 W/unit)
+        0x07,  // CHARGE_STATE          3 = not charging
+    };
+    private static final int HEV_FLAG_ODOMETER = 0x1f;   // raw, 0.1 km
+    private static final int HCAN_TX_GET_CAR_SPEED = 0x0b;  // getCarSpeed(B)F
+    private static final int HCAN_TX_GET_VIN = 0x2f;        // getVIN()String
+    private static int sOdoStartRaw = -1;
+    private static String sVinModel;                     // null = not read yet
 
     // Navigation.BATTERY_INFO_RX packet indices (see
     // com.hkmc.micom.protocol.Navigation$BATTERY_INFO_RX).
     private static final int IDX_MIN_BATT_TEMP = 1;   // XEV_MIN_BATT_TEMP, C
     private static final int IDX_EV_AVLBL_ENRG = 2;   // EV_AVLBL_ENRG, 2 Wh steps
-    private static final int IDX_OUT_TEMP = 4;        // DATC_OUT_TEMP_SNSR, C
-    private static final int IDX_DTE_BASE = 6;        // VCU_DTE_BASE
-    private static final int IDX_DTE_ADD = 7;         // VCU_DTE_ADD
+    private static final int IDX_OUT_TEMP = 4;        // DATC_OUT_TEMP_SNSR raw
+    private static final int IDX_DTE_BASE = 6;        // VCU_DTE_BASE, km
+    private static final int IDX_DTE_ADD = 7;         // VCU_DTE_ADD, km
 
     private static final int MIN_ENERGY_WH = 500;  // Maps drops models with 0
 
-    // Outside temp sanity range (C); the raw DATC value's scaling is not
-    // confirmed, so anything outside this is treated as unknown.
-    private static final int OUT_TEMP_MIN_C = -45;
-    private static final int OUT_TEMP_MAX_C = 55;
+    // Outside temp: unsigned raw x 0.5 - 40 C (Hyundai's own decode of the
+    // DATC signal, docs/DATA-SOURCES.md 2); 0xFE/0xFF = invalid.
     private static final int COLD_HYST_C = 3;
     private static int sColdTempC = Integer.MIN_VALUE;  // temp A is based on
 
@@ -98,7 +124,6 @@ public final class EvModelSender {
     private static NavigationCluster sNavCluster;
     private static volatile long sNavPacketAt;
     private static volatile int sPackTempC = Integer.MIN_VALUE;
-    private static volatile int sOutsideTempC = Integer.MIN_VALUE;
     private static volatile int sOutTempRaw = Integer.MIN_VALUE;
     private static volatile int sAvlblEnrg = -1;
     private static volatile int sDteBase = -1;
@@ -181,37 +206,24 @@ public final class EvModelSender {
                             EvModelTemplate.CAPACITY_WIDTH);
                     writeFixedVarint(msg, EvModelTemplate.ENERGY_OFFSET, wh,
                             EvModelTemplate.ENERGY_WIDTH);
-                    int outC = outsideTempC();
-                    if (outC != Integer.MIN_VALUE) {
-                        writeFloatLe(msg, EvModelTemplate.TEMP_OFFSET,
-                                (float) outC);
+                    float outC = outsideTempC();
+                    boolean outOk = !Float.isNaN(outC);
+                    if (outOk) {
+                        writeFloatLe(msg, EvModelTemplate.TEMP_OFFSET, outC);
                     }
-                    float roadA = coldRoadLoadA(outC);
+                    float roadA = coldRoadLoadA(outOk ? Math.round(outC)
+                            : Integer.MIN_VALUE);
                     writeFloatLe(msg, EvModelTemplate.ROAD_A_OFFSET, roadA);
                     int rc = sSource.sendRawMessage(msg);
                     Log.i(TAG, "energy model sent: " + wh + " Wh of " + cap
                             + " Wh (" + capacitySource() + "), soc=" + halfPct
-                            + "/200, rc=" + rc + ", pack=" + packTempStr()
-                            + "C, out=" + (outC == Integer.MIN_VALUE ? "?" : outC)
+                            + "/200, enrg=" + sEnergyRaw + ", rc=" + rc
+                            + ", pack=" + packTempStr()
+                            + "C, out=" + (outOk ? String.valueOf(outC) : "?")
                             + "C (raw " + sOutTempRaw + "), A=" + Math.round(roadA)
-                            + "N, enrg=" + sAvlblEnrg
-                            + ", dte=" + sDteBase + "+" + sDteAdd
-                            + ", soh=" + sohRaw());
-                    boolean fresh = navFresh();
-                    EvLogger.row(SystemClock.uptimeMillis(),
-                            halfPct >= 0 ? Integer.valueOf(halfPct) : null,
-                            Integer.valueOf(wh), Integer.valueOf(cap),
-                            fresh && sAvlblEnrg >= 0 ? Integer.valueOf(sAvlblEnrg) : null,
-                            fresh && sOutTempRaw != Integer.MIN_VALUE
-                                    ? Integer.valueOf(sOutTempRaw) : null,
-                            outC != Integer.MIN_VALUE ? Integer.valueOf(outC) : null,
-                            fresh ? Integer.valueOf(sPackTempC) : null,
-                            fresh && sDteBase >= 0 ? Integer.valueOf(sDteBase + sDteAdd) : null,
-                            Integer.valueOf(Math.round(roadA)),
-                            sColdTempC != Integer.MIN_VALUE
-                                    ? Integer.valueOf(sColdTempC) : null,
-                            sohRaw() >= 0 ? Integer.valueOf(sohRaw()) : null,
-                            EvModelTemplate.MODEL_REV);
+                            + "N, dte=" + sDteBase + "+" + sDteAdd + "km");
+                    logRow(halfPct, wh, cap, outOk ? Float.valueOf(outC) : null,
+                            roadA);
                 }
             }
             try {
@@ -233,8 +245,7 @@ public final class EvModelSender {
                     }
                     sNavPacketAt = SystemClock.uptimeMillis();
                     sPackTempC = (byte) d[IDX_MIN_BATT_TEMP];
-                    sOutsideTempC = (byte) d[IDX_OUT_TEMP];
-                    sOutTempRaw = d[IDX_OUT_TEMP];
+                    sOutTempRaw = d[IDX_OUT_TEMP] & 0xff;
                     sAvlblEnrg = d[IDX_EV_AVLBL_ENRG];
                     sDteBase = d[IDX_DTE_BASE];
                     sDteAdd = d[IDX_DTE_ADD];
@@ -286,12 +297,13 @@ public final class EvModelSender {
         return navFresh() ? String.valueOf(sPackTempC) : "?";
     }
 
-    private static int outsideTempC() {
-        if (!navFresh() || sOutsideTempC < OUT_TEMP_MIN_C
-                || sOutsideTempC > OUT_TEMP_MAX_C) {
-            return Integer.MIN_VALUE;
+    /** Outside temp in C from a fresh nav packet, NaN if unknown. */
+    private static float outsideTempC() {
+        int raw = sOutTempRaw;
+        if (!navFresh() || raw < 0 || raw >= 0xfe) {
+            return Float.NaN;
         }
-        return sOutsideTempC;
+        return raw * 0.5f - 40f;
     }
 
     // ---- cold road load ------------------------------------------------------
@@ -343,13 +355,21 @@ public final class EvModelSender {
         return halfPct;
     }
 
-    /** BMS available energy in Wh from a fresh nav packet, -1 if none. */
+    /**
+     * BMS remaining usable energy in Wh (HEV 0x31, falling back to a fresh
+     * nav packet), -1 if neither has a valid value.
+     */
     private static int availableEnergyWh() {
-        if (!navFresh() || sAvlblEnrg <= 0) {
+        int raw = getHevStatus(HEV_FLAG_ENERGYMAP);
+        if (raw <= 0 || raw >= ENRG_INVALID) {
+            raw = navFresh() ? sAvlblEnrg : -1;
+        }
+        if (raw <= 0 || raw >= ENRG_INVALID || raw * ENRG_WH_PER_UNIT > CAP_MAX_WH) {
+            sEnergyRaw = -1;
             return -1;
         }
-        int wh = sAvlblEnrg * ENRG_WH_PER_UNIT;
-        return wh <= CAP_MAX_WH ? wh : -1;
+        sEnergyRaw = raw;
+        return raw * ENRG_WH_PER_UNIT;
     }
 
     /**
@@ -374,14 +394,20 @@ public final class EvModelSender {
         if (availWh <= 0 || halfPct < CAP_MIN_HALF_PCT) {
             return;
         }
+        boolean good = halfPct >= CAP_GOOD_HALF_PCT;
+        if (sCapacityGood && !good) {
+            return;
+        }
         float sample = (float) availWh * 200f / halfPct;
         if (sample < CAP_MIN_WH || sample > CAP_MAX_WH) {
             return;
         }
         int before = Math.round(sCapacityEst);
-        sCapacityEst = sCapacityEst < 0 ? sample
+        boolean upgrade = good && !sCapacityGood;
+        sCapacityEst = sCapacityEst < 0 || upgrade ? sample
                 : sCapacityEst + CAP_ALPHA * (sample - sCapacityEst);
-        if (Math.abs(Math.round(sCapacityEst) - before) >= 100) {
+        sCapacityGood |= good;
+        if (upgrade || Math.abs(Math.round(sCapacityEst) - before) >= 100) {
             saveCapacity();
         }
     }
@@ -419,10 +445,13 @@ public final class EvModelSender {
             java.io.BufferedReader r = new java.io.BufferedReader(
                     new java.io.FileReader(f));
             try {
-                int v = Integer.parseInt(r.readLine().trim());
+                String[] f2 = r.readLine().trim().split(" ");
+                int v = Integer.parseInt(f2[0]);
                 if (v >= CAP_MIN_WH && v <= CAP_MAX_WH) {
                     sCapacityEst = v;
-                    Log.i(TAG, "learned capacity loaded: " + v + " Wh");
+                    sCapacityGood = f2.length > 1 && "1".equals(f2[1]);
+                    Log.i(TAG, "learned capacity loaded: " + v + " Wh"
+                            + (sCapacityGood ? "" : " (low-SOC samples)"));
                 }
             } finally {
                 r.close();
@@ -441,7 +470,7 @@ public final class EvModelSender {
             java.io.File tmp = new java.io.File(f.getPath() + ".tmp");
             java.io.FileWriter w = new java.io.FileWriter(tmp);
             try {
-                w.write(Math.round(sCapacityEst) + "\n");
+                w.write(Math.round(sCapacityEst) + (sCapacityGood ? " 1" : " 0") + "\n");
             } finally {
                 w.close();
             }
@@ -461,6 +490,124 @@ public final class EvModelSender {
                     .invoke(null);
             return ctx == null ? null : new java.io.File(ctx.getFilesDir(), name);
         } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** One EvLogger row (columns in EvLogger.COLUMNS order). */
+    private static void logRow(int halfPct, int wh, int cap, Float outC, float roadA) {
+        boolean fresh = navFresh();
+        int odo = getHevStatus(HEV_FLAG_ODOMETER);
+        if (odo > 0 && sOdoStartRaw < 0) {
+            sOdoStartRaw = odo;
+        }
+        Object odoDelta = odo > 0 && odo >= sOdoStartRaw
+                ? Float.valueOf((odo - sOdoStartRaw) / 10f) : null;
+        float speed = hscanFloat(HCAN_TX_GET_CAR_SPEED, 0);  // 0 = km/h
+        Object[] v = new Object[19 + LOG_FLAGS.length];
+        int i = 0;
+        v[i++] = halfPct >= 0 ? Integer.valueOf(halfPct) : null;
+        v[i++] = Integer.valueOf(wh);
+        v[i++] = Integer.valueOf(cap);
+        v[i++] = sEnergyRaw > 0 ? Integer.valueOf(sEnergyRaw) : null;
+        v[i++] = fresh && sOutTempRaw >= 0 ? Integer.valueOf(sOutTempRaw) : null;
+        v[i++] = outC;
+        v[i++] = fresh ? Integer.valueOf(sPackTempC) : null;
+        v[i++] = fresh && sDteBase >= 0 ? Integer.valueOf(sDteBase + sDteAdd) : null;
+        v[i++] = Integer.valueOf(Math.round(roadA));
+        v[i++] = sColdTempC != Integer.MIN_VALUE ? Integer.valueOf(sColdTempC) : null;
+        v[i++] = sohRaw() >= 0 ? Integer.valueOf(sohRaw()) : null;
+        v[i++] = EvModelTemplate.MODEL_REV;
+        v[i++] = Float.isNaN(speed) || speed < 0 ? null : Float.valueOf(speed);
+        v[i++] = odoDelta;
+        for (int f : LOG_FLAGS) {
+            int r = getHevStatus(f);
+            v[i++] = r >= 0 ? Integer.valueOf(r) : null;
+        }
+        boolean nav = Precond.navActive();
+        int remM = Precond.remainingMeters();
+        int remS = Precond.remainingSeconds();
+        int kw = Precond.chargerKw();
+        v[i++] = Integer.valueOf(nav ? 1 : 0);
+        v[i++] = nav && remM >= 0 ? Integer.valueOf(remM) : null;
+        v[i++] = nav && remS >= 0 ? Integer.valueOf(remS) : null;
+        v[i++] = nav ? Integer.valueOf(Precond.isCharger() ? 1 : 0) : null;
+        v[i++] = nav && kw >= 0 ? Integer.valueOf(kw) : null;
+        v[i++] = Integer.valueOf(Precond.state());
+        EvLogger.row(SystemClock.uptimeMillis(), v);
+    }
+
+    /**
+     * VIN characters 1-8 and 10 (make, model, body, motor, model year) for
+     * the log header; never the check digit, plant or serial. "" if unknown.
+     */
+    static String vinModel() {
+        if (sVinModel == null) {
+            String vin = hscanString(HCAN_TX_GET_VIN);
+            sVinModel = vin != null && vin.matches("[A-HJ-NPR-Z0-9]{17}")
+                    ? vin.substring(0, 8) + vin.charAt(9) : "";
+        }
+        return sVinModel;
+    }
+
+    private static IBinder hscan() throws Exception {
+        if (sHcan == null) {
+            sHcan = (IBinder) Class.forName("android.os.ServiceManager")
+                    .getMethod("getService", String.class)
+                    .invoke(null, HCAN_SERVICE);
+        }
+        return sHcan;
+    }
+
+    /** hscan float getter with one byte argument, NaN on failure. */
+    private static float hscanFloat(int txn, int arg) {
+        try {
+            IBinder b = hscan();
+            if (b == null) {
+                return Float.NaN;
+            }
+            Parcel data = Parcel.obtain();
+            Parcel reply = Parcel.obtain();
+            try {
+                data.writeInterfaceToken(HCAN_TOKEN);
+                data.writeByte((byte) arg);
+                if (!b.transact(txn, data, reply, 0)) {
+                    return Float.NaN;
+                }
+                reply.readException();
+                return reply.readFloat();
+            } finally {
+                data.recycle();
+                reply.recycle();
+            }
+        } catch (Throwable t) {
+            sHcan = null;
+            return Float.NaN;
+        }
+    }
+
+    /** hscan String getter, null on failure. */
+    private static String hscanString(int txn) {
+        try {
+            IBinder b = hscan();
+            if (b == null) {
+                return null;
+            }
+            Parcel data = Parcel.obtain();
+            Parcel reply = Parcel.obtain();
+            try {
+                data.writeInterfaceToken(HCAN_TOKEN);
+                if (!b.transact(txn, data, reply, 0)) {
+                    return null;
+                }
+                reply.readException();
+                return reply.readString();
+            } finally {
+                data.recycle();
+                reply.recycle();
+            }
+        } catch (Throwable t) {
+            sHcan = null;
             return null;
         }
     }
