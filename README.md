@@ -1,104 +1,57 @@
 # egmp-aa-ev-feat
 
-Adding an energy model and live vehicle data to Android Auto on Hyundai/Kia Gen5W head units, so Google Maps does real EV routing: battery % on arrival, charging stops, charge times and range. Built on [NEMESIS](https://github.com/xwtk/hmg_nemesis) and [HMG Leafia Plus](https://github.com/VysseCodes/HMG-Leafia-Plus) for the 2022 Ioniq 5.
-
-Out of the box the head unit tells Android Auto nothing about the car's fuel type or battery, so Maps routes it like a gas car. This project patches the head unit's Android Auto stack so it does what EVs with native Android Auto EV support do: it advertises an electric car with CCS1/J1772 ports, and every 5 seconds it sends Maps a vehicle energy model with the battery's live energy. It also preconditions the battery when Maps routes you to a fast charger, and logs drives so the model can be calibrated.
+Real EV routing in Google Maps on Android Auto for the Hyundai Ioniq 5's Gen5W head unit: battery % on arrival, charging stops, realistic charge times, and automatic battery preconditioning on the way to a fast charger. Built on [NEMESIS](https://github.com/xwtk/hmg_nemesis) and [HMG Leafia Plus](https://github.com/VysseCodes/HMG-Leafia-Plus).
 
 > [!WARNING]
-> This modifies files on your car's infotainment system. The installer checks every file before touching it, keeps a byte-for-byte backup and refuses anything it doesn't recognise, but you use it at your own risk. Not affiliated with Hyundai, Kia or Google.
+> This modifies your infotainment system's files. The installer checks every file first and keeps a byte-for-byte backup, but you use it at your own risk. Not affiliated with Hyundai, Kia or Google.
 
-## Status
+## Requirements
 
-| | |
-|---|---|
-| Car | Hyundai Ioniq 5 (US), 2022, Gen5W `NEEV.USA.0000.V015.012.260507` |
-| Requires | NEMESIS + HMG Leafia Plus **v1.0.5** (the installer refuses other versions) |
-| Works (verified on the car) | EV routing in Maps (battery on arrival, charging stops, range); usable capacity learned from the BMS; outside temperature and the cold-weather model; charge times that match the car's own estimate; automatic battery preconditioning for fast-charging stops; drive logs copied to a USB drive. All tested over **wired** AA. |
-| Not yet | Wireless AA with these features (same code path, not confirmed); other E-GMP cars/firmware |
+- Hyundai Ioniq 5 (US), Gen5W software `NEEV.USA.0000.V015.012.260507`
+- NEMESIS and HMG Leafia Plus **v1.0.5** (the installer refuses anything else and changes nothing)
 
 ## Features
 
-- **EV routing.** Maps plans charging stops and shows battery % on arrival from the battery's live energy.
-- **Real capacity.** The usable capacity is learned on the car from the BMS's remaining energy ÷ the displayed SOC (~62.9 kWh on a ~105k mi pack, vs 77.4 kWh new) and kept across sessions. The energy sent to Maps comes straight from the BMS. No settings.
-- **Cold weather.** Live outside temperature drives a heater power table and a higher road load in the cold, so winter trips get the extra stop they need.
-- **Realistic charge times.** Charge curve and time tables from 233 real DC sessions and the car's own estimate (80→90 % ≈ 8 min, 90→100 % ≈ 18 min on 350 kW), scaled to the learned capacity. Tesla Superchargers are modelled at the flat ~105 kW this 800 V car gets there.
-- **Automatic battery preconditioning.** When the next stop on the Maps route is a charging stop above 50 kW and at most 60 minutes away, the car is asked to precondition, the same way its own navigation does. The car's battery management decides when to heat. Always on; the car's own **battery conditioning** EV setting is the off control. Details: [docs/PRECONDITIONING.md](docs/PRECONDITIONING.md).
-- **Drive logs.** One small CSV per Android Auto session, copied to any USB drive that has an `egmp-aa-ev-logs` folder, with a pop-up on the head unit. Check and submit them on the [drive log checker](https://willemcvu.github.io/egmp-aa-ev-feat/).
+- **EV routing:** the head unit sends Maps a vehicle energy model with the battery's live energy, so Maps plans stops and shows arrival %.
+- **Real capacity:** usable capacity is learned from the BMS, not assumed from the new-car 77.4 kWh.
+- **Cold weather:** live outside temperature raises heating and rolling losses in the model.
+- **Charge times:** calibrated on real DC sessions and the car's own estimate, including the slow last 10–20 %.
+- **Preconditioning:** when the next stop is a charger over 50 kW within an hour, the car is asked to warm the battery. Turn it off with the car's own *battery conditioning* setting.
+- **Drive logs:** copied to any USB drive with an `egmp-aa-ev-logs` folder; check and share them on the [drive log checker](https://willemcvu.github.io/egmp-aa-ev-feat/).
 
 ## Install
 
-1. Download `egmp-aa-ev-feat-<version>-usb.zip` from [Releases](../../releases).
-2. Copy its **contents** to the root of an empty FAT32/exFAT USB drive.
-3. Car on, plug the drive into a USB data port, tap **Yes** when NEMESIS asks. The head unit restarts by itself when it's done; remove the drive while it restarts.
+1. Download the `-usb.zip` from [Releases](../../releases) and copy its **contents** to an empty FAT32/exFAT drive.
+2. Car on, plug the drive into a USB data port, tap **Yes** when NEMESIS asks. The head unit restarts when it's done.
 
-Installing over an earlier version upgrades it in place. Uninstall from NEMESIS Manager (press NAV three times) → `aa.ev.model` → uninstall, then reboot; Leafia's files are restored byte for byte. Uninstall this **before** updating or removing Leafia. Full instructions and troubleshooting are in the `README.txt` inside the release ([source](release/README.txt)).
+It upgrades earlier versions in place. To uninstall: NEMESIS Manager (press NAV three times) → `aa.ev.model` → uninstall, then reboot; Leafia's files are restored exactly. Uninstall this before updating Leafia. More in the release's [README.txt](release/README.txt).
 
-The release contains no Hyundai or Google files: only install scripts, the log offload service, two small binary deltas and [`lpatch`](third_party/lpatch) (from Leafia, GPL-3.0). On the head unit, `lpatch` rebuilds the modified files from the unit's own Leafia files, and only if they are byte-for-byte the expected ones.
-
-## How it works
-
-- **AA receiver library** (`libautoreceiver_infobank.so`): 7 bytes in three places, so sensor 23 (vehicle energy model) requests are accepted and answered, and Java gets a raw send path. `tools/patch_library.py`.
-- **GPM projection app**: `SensorSource` advertises fuel type ELECTRIC, connectors CCS1 + J1772 and sensor 23, and runs `EvModelSender` (`gpm-ev/src`), which reads SOC, BMS energy and outside temperature from the car's services and sends the model every 5 s. `Precond` reads Maps' navigation messages and drives the car's preconditioning interface; `EvLogger` writes the drive log. `tools/patch_gpm_smali.py`.
-- **Energy model**: the protobuf Maps consumes, schema recovered from Google Maps (`reference/vehicle_energy_model.proto`). Ioniq 5 values come from a rolldown test (road load), real DC charging sessions (charge curve and times) and live car data. `tools/build_ioniq5_model.py`, details in [docs/ENERGY-MODEL.md](docs/ENERGY-MODEL.md).
-- **Log offload**: a NEMESIS service (`packages/aa-ev-model/svc/evlog-offload.sh`) copies new logs to opted-in USB drives.
-
-Runtime switch (via ADB, then replug Android Auto):
-
-| Property | Effect |
-|---|---|
-| `persist.gpm.ev.off=1` | stock behaviour without uninstalling (`0` turns it back on) |
+The release contains no Hyundai or Google files, only small binary deltas that [`lpatch`](third_party/lpatch) applies to your unit's own files.
 
 ## Docs
 
 | | |
 |---|---|
-| [docs/ENERGY-MODEL.md](docs/ENERGY-MODEL.md) | energy model schema, field meanings, Ioniq 5 values and calibration |
-| [docs/PRECONDITIONING.md](docs/PRECONDITIONING.md) | automatic battery preconditioning: research, design, rules, tests |
-| [docs/LOGGING.md](docs/LOGGING.md) | drive log format v1, cleaning rules, `tools/evlog.py` |
-| [docs/DATA-SOURCES.md](docs/DATA-SOURCES.md) | what vehicle data the head unit exposes, and how to read it |
-| [docs/RESEARCH.md](docs/RESEARCH.md) | head unit internals, what Maps needs on the wire, patch design |
-| [docs/HANDOFF.md](docs/HANDOFF.md) | developer handoff: current state, build, install, troubleshooting |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | what's built and what's next |
-| [Drive log checker](https://willemcvu.github.io/egmp-aa-ev-feat/) | check, clean and submit drive logs in your browser (`site/`) |
+| [ENERGY-MODEL](docs/ENERGY-MODEL.md) | the energy model and its calibration |
+| [PRECONDITIONING](docs/PRECONDITIONING.md) | how preconditioning works |
+| [LOGGING](docs/LOGGING.md) | drive log format and `tools/evlog.py` |
+| [DATA-SOURCES](docs/DATA-SOURCES.md) | vehicle data the head unit exposes |
+| [RESEARCH](docs/RESEARCH.md) | head unit internals and the patch design |
+| [HANDOFF](docs/HANDOFF.md) | developer guide: build, install, troubleshooting |
+| [ROADMAP](docs/ROADMAP.md) | what's next |
 
-## Contributing drive logs
+## Building
 
-Logs from more cars, climates and battery ages are what the energy model needs most. The head unit writes one small CSV per Android Auto session (battery level, temperatures, model values; no location, no full VIN, no times of day). To collect them, make a folder named `egmp-aa-ev-logs` on a USB drive and plug it in after driving; a pop-up says how many were copied. Check and clean them on the [drive log checker](https://willemcvu.github.io/egmp-aa-ev-feat/), which runs in your browser, then submit them as a (public) GitHub issue from there. Format and command-line tool: [docs/LOGGING.md](docs/LOGGING.md).
-
-## Repository layout
-
-| Path | |
-|---|---|
-| `gpm-ev/` | Java sources (energy-model sender, preconditioning, drive logger), compile stubs and host tests |
-| `tools/` | library/GPM patchers, model generator, build, package and log tests, release build, log tool |
-| `packages/aa-ev-model/` | the NEMESIS package (install/uninstall scripts, log offload service) |
-| `packages/adb-home/` | optional dev helper: ADB over your home Wi-Fi only (set your router's MAC first) |
-| `reference/` | recovered model schema and protobuf decoders |
-| `site/` | drive log checker (GitHub Pages) and the log allowlist `schema.json` |
-| `release/` | USB-drive descriptor and README for releases |
-| `third_party/lpatch/` | Leafia's `lpatch` and delta tool (GPL-3.0) |
-
-## Building from source
-
-The build patches files pulled from your own head unit, which aren't in this repo. Put them in `private/` (gitignored):
-
-- `private/car-current-leafia105/`: `HKMC_GPM.apk`, `HKMC_GPM.odex`, `libautoreceiver_infobank.so` from a unit with Leafia v1.0.5, and `smali-gpm/` (baksmali of that APK's `classes.dex`)
-- `private/car-neev-260507/LEAFIA/private/stock/app/HKMC_GPM.apk`: the stock GPM APK (Leafia's backup)
-
-Tools: Android SDK build-tools + `platforms/android-19`, smali/baksmali 2.5.2, Python with `capstone` and `bsdiff4`, `protoc`, `zip`, and `qemu-arm-static` (runs the ARM `lpatch` on the host).
+The build patches files from your own head unit (not in this repo); see [HANDOFF](docs/HANDOFF.md) for what goes in `private/` and the toolchain.
 
 ```sh
-PY=/path/to/python sh tools/build_all.sh   # library, model, dex, APK, NEMESIS package
-sh gpm-ev/test/run.sh                      # Java host tests: PrecondTest, SenderRowTest, ScaleTest
-bash tools/test_package.sh                 # install/uninstall/upgrade and log offload in a sandbox
-sh tools/test_evlog.sh                     # drive log checker/cleaner (evlog.py, and evlog.js with node)
-sh tools/build_release.sh v0.2.0           # USB release zip (needs a clean, committed tree)
+PY=/path/to/python sh tools/build_all.sh   # build everything
+sh gpm-ev/test/run.sh                      # Java host tests
+bash tools/test_package.sh                 # package install/uninstall sandbox
+sh tools/test_evlog.sh                     # drive log tools
+sh tools/build_release.sh v0.2.0           # USB release zip
 ```
 
 ## Credits
 
-- [NEMESIS](https://github.com/xwtk/hmg_nemesis) by xwtk: root and the package system (AGPL-3.0)
-- [HMG Leafia Plus](https://github.com/VysseCodes/HMG-Leafia-Plus): wireless CarPlay/AA, the projection patches this builds on, and `lpatch` (GPL-3.0)
-- [aa-proxy-rs](https://github.com/aa-proxy/aa-proxy-rs): the reference for Android Auto EV data and the Ford sample model
-- [open-android-auto](https://github.com/mrmees/open-android-auto): Android Auto protocol definitions
-- [gen5w-preconditioning](https://github.com/paytondevs/gen5w-preconditioning): the car's preconditioning interface and its command profile
+[NEMESIS](https://github.com/xwtk/hmg_nemesis) (xwtk), [HMG Leafia Plus](https://github.com/VysseCodes/HMG-Leafia-Plus) (including `lpatch`, GPL-3.0), [aa-proxy-rs](https://github.com/aa-proxy/aa-proxy-rs), [open-android-auto](https://github.com/mrmees/open-android-auto), [gen5w-preconditioning](https://github.com/paytondevs/gen5w-preconditioning).

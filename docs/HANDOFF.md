@@ -38,9 +38,18 @@ Local, gitignored inputs: `private/car-current-leafia105/` (the live GPM APK/ode
 5. `dist/HKMC_GPM.apk` = Leafia APK with only `classes.dex` replaced.
 6. `packages/aa-ev-model/` → `dist/aa.ev.model.zip`: md5-gated on the Leafia v1.0.5 files (or this package's own, for an upgrade), snapshot + byte-for-byte uninstall only if live files are still ours, plus the `evlog-offload` service. It carries only lpatch deltas, no Hyundai/Google binaries.
 
-Verified on the car: EV routing; capacity ~62.9 kWh learned from the BMS; outside temp matches the dash; Maps' charge times look right; preconditioning REQUESTED → ACTIVE on short routes, cancel on route end (Off within ~2.5 s), stays REQUESTED on a 58-min route; drive logs copied to USB with the pop-up. All over wired AA.
+Verified on the car: EV routing; capacity ~62.9 kWh learned from the BMS; outside temp matches the dash; Maps' charge times look right; preconditioning REQUESTED → ACTIVE on short routes, cancel on route end (Off within ~2.5 s), stays REQUESTED on a 58-min route; drive logs copied to USB with the pop-up.
 
 Tests (host): `sh gpm-ev/test/run.sh` (PrecondTest, SenderRowTest, ScaleTest), `bash tools/test_package.sh` (install / uninstall / upgrade / Leafia-removed-in-between / refusal / log offload in a sandbox), `sh tools/test_evlog.sh`.
+
+## Build prerequisites
+
+The build patches files pulled from your own head unit. Put them in `private/` (gitignored):
+
+- `private/car-current-leafia105/`: `HKMC_GPM.apk`, `HKMC_GPM.odex`, `libautoreceiver_infobank.so` from a unit with Leafia v1.0.5, and `smali-gpm/` (baksmali of that APK's `classes.dex`)
+- `private/car-neev-260507/LEAFIA/private/stock/app/HKMC_GPM.apk`: the stock GPM APK (Leafia's backup)
+
+Tools: Android SDK build-tools + `platforms/android-19`, smali/baksmali 2.5.2, Python with `capstone` and `bsdiff4`, `protoc`, `zip`, and `qemu-arm-static` (runs the ARM `lpatch` on the host).
 
 ## Install / upgrade
 
@@ -74,7 +83,6 @@ USB: copy the release zip's contents to a drive, plug it in, tap Yes (`release/R
 ## Open questions
 
 - Usable capacity: the BMS gives ~62.9 kWh, but recent DC sessions suggest ~70–71 kWh. A logged DC charge (ΔENERGYMAP vs charger kWh) settles it (`ROADMAP.md` item 3).
-- Wireless AA with these features (same code path, not yet confirmed).
 - Is the single 0x8007 entry always the next stop on a real multi-stop drive?
 - Does Maps' server use the 4.1 curve, the 8.1 tables or both, and how does it treat AC rows (`ENERGY-MODEL.md`)?
 - Meaning of the model's unidentified fields; safe to leave out.

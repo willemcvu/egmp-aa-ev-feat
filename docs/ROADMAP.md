@@ -8,7 +8,7 @@ When Google Maps on Android Auto is guiding to a DC fast charger, ask the car to
 
 - **How:** `IHEVService` transactions 62/65/66 (`setBattCondEvStation`, `setBattCondRouteDis`, `setBattCondRemainTime`), the same inputs the car's own navigation uses, with distance and time from Maps' navigation messages (0x8006/0x8007, via Leafia's `NAVDUMP` hook). Java only, in GPM, mirroring the manual Launchpad app's command profile. Details in [PRECONDITIONING.md](PRECONDITIONING.md).
 - **Status (2026-10-29): verified on the car.** Always on, no switch (the car's battery-conditioning setting is the off control). Triggers when the next stop is a charging stop above 50 kW at most 60 min away. On short routes the request goes REQUESTED → ACTIVE (the car's indicator comes on); ending the route cancels it (Off within ~2.5 s); on a 58-min route it stays REQUESTED while the BMS waits to heat.
-- **Still open:** a real multi-stop drive (is the single 0x8007 entry always the next stop?), a cold-morning drive to a charger, and wireless AA.
+- **Still open:** a real multi-stop drive (is the single 0x8007 entry always the next stop?) and a cold-morning drive to a charger.
 
 ## 2. Drive logging for model calibration (logging done, analysis next)
 
@@ -33,6 +33,5 @@ Use the drive logs (item 2) to correct the model on the car: compare predicted a
 
 ## To verify (existing features)
 
-- Wireless Android Auto with EV routing, preconditioning and logging (tested wired only).
 - Supercharger charge times: does Maps use the 250 kW table row for Tesla stations?
 - Cold model on a real winter trip: does Maps add the stop the warm model missed at ~26 °F? (Outside temperature itself is confirmed: raw × 0.5 − 40 °C matches the dash.)
