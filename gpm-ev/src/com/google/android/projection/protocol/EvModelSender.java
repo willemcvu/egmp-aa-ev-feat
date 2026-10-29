@@ -124,6 +124,7 @@ public final class EvModelSender {
                 return;
             }
             sRunning = true;
+            EvLogger.startSession(SystemClock.uptimeMillis());
             sThread = new Thread(new Runnable() {
                 @Override
                 public void run() {
@@ -140,6 +141,7 @@ public final class EvModelSender {
         Thread t;
         synchronized (LOCK) {
             sRunning = false;
+            EvLogger.endSession();
             t = sThread;
             sThread = null;
             sSource = null;
@@ -195,6 +197,21 @@ public final class EvModelSender {
                             + "N, enrg=" + sAvlblEnrg
                             + ", dte=" + sDteBase + "+" + sDteAdd
                             + ", soh=" + sohRaw());
+                    boolean fresh = navFresh();
+                    EvLogger.row(SystemClock.uptimeMillis(),
+                            halfPct >= 0 ? Integer.valueOf(halfPct) : null,
+                            Integer.valueOf(wh), Integer.valueOf(cap),
+                            fresh && sAvlblEnrg >= 0 ? Integer.valueOf(sAvlblEnrg) : null,
+                            fresh && sOutTempRaw != Integer.MIN_VALUE
+                                    ? Integer.valueOf(sOutTempRaw) : null,
+                            outC != Integer.MIN_VALUE ? Integer.valueOf(outC) : null,
+                            fresh ? Integer.valueOf(sPackTempC) : null,
+                            fresh && sDteBase >= 0 ? Integer.valueOf(sDteBase + sDteAdd) : null,
+                            Integer.valueOf(Math.round(roadA)),
+                            sColdTempC != Integer.MIN_VALUE
+                                    ? Integer.valueOf(sColdTempC) : null,
+                            sohRaw() >= 0 ? Integer.valueOf(sohRaw()) : null,
+                            EvModelTemplate.MODEL_REV);
                 }
             }
             try {

@@ -34,6 +34,7 @@ Outputs:
   gpm-ev/src/com/google/android/projection/protocol/EvModelTemplate.java
 """
 
+import hashlib
 import struct
 import subprocess
 import sys
@@ -369,6 +370,7 @@ def main() -> int:
     a_off = a_off_in_model + hdr
     print(f"model {len(model)} bytes, batch {len(batch)} bytes; offsets: "
           f"energy@{energy_off} capacity@{cap_off} temp@{temp_off} roadA@{a_off}")
+    model_rev = hashlib.sha1(batch).hexdigest()[:8]
     cold_t = ", ".join(f"{t}f" for t, _ in COLD_DELTA_A)
     cold_a = ", ".join(f"{a}f" for _, a in COLD_DELTA_A)
 
@@ -392,6 +394,7 @@ def main() -> int:
         "    static final int ENERGY_WIDTH = %d;\n"
         "    static final int ENERGY_PLACEHOLDER_WH = %d;\n"
         "    static final int TEMP_OFFSET = %d;  // outside_temp_c float bits\n"
+        "    static final String MODEL_REV = \"%s\";  // sha1 of the batch, short\n"
         "    static final int ROAD_A_OFFSET = %d;  // road_load.a_n float bits\n"
         "    static final float ROAD_A_N = %rf;\n"
         "    // extra road load A vs outside temp (C), linear between, clamped\n"
@@ -403,7 +406,7 @@ def main() -> int:
         "    private EvModelTemplate() {}\n"
         "}\n"
         % (CAPACITY_WH, cap_off, CAPACITY_WIDTH, energy_off, ENERGY_WIDTH,
-           PLACEHOLDER_WH, temp_off, a_off, ROAD_LOAD[0], cold_t, cold_a,
+           PLACEHOLDER_WH, temp_off, model_rev, a_off, ROAD_LOAD[0], cold_t, cold_a,
            lines[0], concat)
     )
     print(f"wrote {OUT_TXT.relative_to(ROOT)}, {OUT_MODEL.relative_to(ROOT)}, "

@@ -11,6 +11,7 @@ final class EvModelTemplate {
     static final int ENERGY_WIDTH = 5;
     static final int ENERGY_PLACEHOLDER_WH = 50000;
     static final int TEMP_OFFSET = 35;  // outside_temp_c float bits
+    static final String MODEL_REV = "1c17e5d4";  // sha1 of the batch, short
     static final int ROAD_A_OFFSET = 44;  // road_load.a_n float bits
     static final float ROAD_A_N = 196.0f;
     // extra road load A vs outside temp (C), linear between, clamped

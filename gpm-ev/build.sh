@@ -13,7 +13,7 @@ mkdir -p build/classes build/dex
 javac -source 8 -target 8 \
     -bootclasspath "$ANDROID_HOME/platforms/android-19/android.jar" \
     -d build/classes \
-    src/$PKG/EvModelSender.java src/$PKG/EvModelTemplate.java \
+    src/$PKG/EvModelSender.java src/$PKG/EvModelTemplate.java src/$PKG/EvLogger.java \
     stubs/$PKG/SensorSource.java \
     stubs/com/hkmc/cluster/NavigationCluster.java \
     stubs/com/hkmc/cluster/NavigationClusterListener.java

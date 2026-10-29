@@ -37,6 +37,6 @@ chmod 755 "$F/lpatch"
 
 out=dist/aa.ev.model.zip
 rm -f "$out"
-( cd packages/aa-ev-model && zip -q -r -D "$OLDPWD/$out" NEMESIS.data bin files scripts )
+( cd packages/aa-ev-model && zip -q -r -D "$OLDPWD/$out" NEMESIS.data bin files scripts svc )
 echo "built $out"
 md5sum "$out"

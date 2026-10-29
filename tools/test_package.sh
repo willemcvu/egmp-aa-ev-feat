@@ -13,6 +13,7 @@
 #   6. upgrade over an earlier build of this package (different GPM APK)
 #   7. refusal when the Leafia snapshot is not intact
 #   8. the package carries only deltas, lpatch and the manifest
+#   9. drive-log offload to an opted-in USB drive
 #
 # files/lpatch is the real ARM binary; it runs here through qemu binfmt.
 #
@@ -97,6 +98,17 @@ EOF
 #!/bin/bash
 exit 0
 EOF
+    # toolbox-style `ls -l FILE`: perms owner group size date time name
+    cat > "$S/system/bin/ls" <<'EOF'
+#!/bin/bash
+if [ "$1" = -l ] && [ -f "$2" ]; then
+    echo "-rw-r--r-- root root $(/usr/bin/stat -c %s "$2") 2026-10-29 00:00 ${2##*/}"
+    exit 0
+fi
+[ "$1" = -l ] && exit 1
+exec /bin/ls "$@"
+EOF
+    chmod +x "$S/system/bin/ls"
     chmod +x "$S/system/xbin/nemesis" "$S/data/nemesis/bin/md5" "$S/system/bin/pm" \
              "$S/system/bin/getprop" "$S/system/bin/dexopt" "$S/system/bin/am" \
              "$S/system/bin/reboot" "$S/system/bin/sleep"
@@ -106,7 +118,7 @@ EOF
 
     # The scripts reset PATH to car dirs; give them the host coreutils they use.
     local _t
-    for _t in cp mv rm rmdir mkdir chmod chown cmp grep tail touch cat sync md5sum dirname; do
+    for _t in cp mv rm rmdir mkdir chmod chown cmp grep tail touch cat sync md5sum dirname date; do
         ln -sf "$(command -v "$_t")" "$S/system/bin/$_t"
     done
 }
@@ -253,6 +265,32 @@ echo "=== 8. package contents ==="
 check "files/ holds only deltas, lpatch and MD5SUMS" $?
 ! unzip -l dist/aa.ev.model.zip | grep -E '\.(apk|so|odex|dex)$' >/dev/null
 check "package zip has no APK/so/odex/dex" $?
+
+echo "=== 9. drive-log offload ==="
+S=$T/s9
+setup_sandbox "$S"
+EV="$S/data/data/com.google.android.projection.sink/files/evlog"
+mkdir -p "$EV" "$S/storage/usb1/egmp-aa-ev-logs"
+printf '# egmp-aa-ev-log v1\nt_s,soc_half_pct\n0,92\n5,92\n' > "$EV/egmp-NEEV-20261029-001.csv"
+run_offload() {
+    ( cd "$S/data/nemesis/apps/aa.ev.model" && EVLOG_ONCE=1 \
+        PATH="$S/system/xbin:$S/system/bin:$S/data/nemesis/bin:$PATH" \
+        /bin/bash svc/evlog-offload.sh 2>&1 )
+}
+run_offload > "$T/s9.1.log"
+cmp "$EV/egmp-NEEV-20261029-001.csv" "$S/storage/usb1/egmp-aa-ev-logs/egmp-NEEV-20261029-001.csv" >/dev/null 2>&1
+check "log copied to the opted-in drive" $?
+[ ! -e "$S/storage/usb0/egmp-aa-ev-logs" ] && [ "$(ls "$S/storage/usb0")" = NEMESIS.data ]
+check "drive without egmp-aa-ev-logs/ untouched" $?
+! ls -a "$S/storage/usb1/egmp-aa-ev-logs" | grep -q '\.tmp$'
+check "no temp file left" $?
+run_offload > "$T/s9.2.log"
+[ "$(grep -c 'copied ' "$S/data/nemesis/aa.ev.model.offload.log")" = 1 ]
+check "unchanged log not copied again" $?
+echo "10,91" >> "$EV/egmp-NEEV-20261029-001.csv"
+run_offload > "$T/s9.3.log"
+cmp "$EV/egmp-NEEV-20261029-001.csv" "$S/storage/usb1/egmp-aa-ev-logs/egmp-NEEV-20261029-001.csv" >/dev/null 2>&1
+check "grown log copied again" $?
 
 echo
 echo "passed: $pass, failed: $fail"

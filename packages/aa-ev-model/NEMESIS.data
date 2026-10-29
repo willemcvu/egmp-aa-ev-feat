@@ -2,7 +2,7 @@
 version=1.0
 id=aa.ev.model
 name=AA EV energy model (Ioniq 5 prototype)
-types=application
+types=application,service
 preinstall=scripts/pre.sh
 postinstall=scripts/post.sh
 preuninstall=scripts/preun.sh
@@ -11,3 +11,10 @@ preuninstall=scripts/preun.sh
 kind=sh
 path=bin/status.sh
 uid=root
+
+[service.0]
+name=evlog-offload
+kind=sh
+path=svc/evlog-offload.sh
+uid=root
+mode=restart
