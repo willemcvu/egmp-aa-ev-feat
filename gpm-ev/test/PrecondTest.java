@@ -107,8 +107,7 @@ public final class PrecondTest {
         });
         long t = 1000000;
 
-        Rig(int mode) {
-            c.setMode(mode, t);
+        Rig() {
             c.recover(t);
         }
 
@@ -235,7 +234,7 @@ public final class PrecondTest {
         check("real S length kept", REAL_S.startsWith("S 69 ") && REAL_S.length() == 5 + 138);
         check("real S parses", s != null && s.kind == 'S' && s.destinations.size() == 1);
         NavProto.Destination d = s.destinations.get(0);
-        check("real S not a charger", !d.hasStation && d.maxPowerKw == -1 && !d.networkMatch);
+        check("real S not a charger", !d.hasStation && d.maxPowerKw == -1);
         check("real S has identity", d.key != 0);
 
         NavProto.Dump c = NavProto.parse(sMsg(new Object[] {"x", DC150}));
@@ -259,9 +258,6 @@ public final class PrecondTest {
                 && !two.destinations.get(0).hasStation && two.destinations.get(1).hasStation
                 && two.destinations.get(1).index == 1);
 
-        check("name match EA", NavProto.isDcNetwork("Electrify America - Walmart 1234"));
-        check("name match case", NavProto.isDcNetwork("TESLA SUPERCHARGER"));
-        check("no name match", !NavProto.isDcNetwork("100 Example Ave"));
 
         boolean threw = false;
         try {
@@ -296,7 +292,7 @@ public final class PrecondTest {
     }
 
     static void testRealNonCharger() throws Exception {
-        Rig r = new Rig(PrecondCore.MODE_ON_NAMES);
+        Rig r = new Rig();
         r.c.onNavStatus(1, r.t);
         for (int i = 0; i < 100; i++) {
             r.dump(REAL_S);
@@ -311,7 +307,7 @@ public final class PrecondTest {
     }
 
     static void testStartMaintainArrive() throws Exception {
-        Rig r = new Rig(PrecondCore.MODE_ON);
+        Rig r = new Rig();
         r.route(DC150, "Some charger", 30000, 1200);
         check("getters: charger", r.c.isCharger() && r.c.chargerKw() == 150);
         check("no start before tick", r.v.drain().isEmpty());
@@ -344,7 +340,7 @@ public final class PrecondTest {
     }
 
     static void testRouteEnd() throws Exception {
-        Rig r = new Rig(PrecondCore.MODE_ON);
+        Rig r = new Rig();
         r.route(DC150, "C", 30000, 1200);
         r.ticks(1);
         r.v.drain();
@@ -353,7 +349,7 @@ public final class PrecondTest {
         r.ticks(3);
         check("no commands after route end", r.v.drain().isEmpty() && !r.j.owned);
         // rerouting keeps it
-        Rig q = new Rig(PrecondCore.MODE_ON);
+        Rig q = new Rig();
         q.route(DC150, "C", 30000, 1200);
         q.ticks(1);
         q.v.drain();
@@ -363,7 +359,7 @@ public final class PrecondTest {
     }
 
     static void testTargetChange() throws Exception {
-        Rig r = new Rig(PrecondCore.MODE_ON);
+        Rig r = new Rig();
         r.route(DC150, "C", 30000, 1200);
         r.ticks(1);
         r.v.drain();
@@ -372,7 +368,7 @@ public final class PrecondTest {
         r.ticks(3);
         check("no restart for non-charger", r.v.drain().isEmpty());
 
-        Rig q = new Rig(PrecondCore.MODE_ON);
+        Rig q = new Rig();
         q.route(DC150, "C", 30000, 1200);
         q.ticks(1);
         q.v.drain();
@@ -385,7 +381,7 @@ public final class PrecondTest {
     }
 
     static void testTimeout() throws Exception {
-        Rig r = new Rig(PrecondCore.MODE_ON);
+        Rig r = new Rig();
         r.route(DC150, "C", 30000, 1200);
         r.ticks(1);
         r.v.drain();
@@ -398,7 +394,7 @@ public final class PrecondTest {
         check("no restart after timeout", r.v.drain().isEmpty()
                 && r.c.state() == PrecondCore.ST_DONE && !r.j.owned);
         // timeout also applies when status reads fail
-        Rig q = new Rig(PrecondCore.MODE_ON);
+        Rig q = new Rig();
         q.route(DC150, "C", 30000, 1200);
         q.ticks(1);
         q.v.drain();
@@ -410,7 +406,7 @@ public final class PrecondTest {
     }
 
     static void testCarEnds() throws Exception {
-        Rig r = new Rig(PrecondCore.MODE_ON);
+        Rig r = new Rig();
         r.route(DC150, "C", 30000, 1200);
         r.ticks(1);
         r.v.indicator = 1;
@@ -419,14 +415,14 @@ public final class PrecondTest {
         r.v.indicator = 0;
         r.ticks(1);
         check("cancel when car goes Active -> Off", r.v.drain().equals(CANCEL));
-        Rig q = new Rig(PrecondCore.MODE_ON);
+        Rig q = new Rig();
         q.route(DC150, "C", 30000, 1200);
         q.ticks(1);
         q.v.drain();
         q.v.ready = 0;
         q.ticks(1);
         check("cancel when READY lost", q.v.drain().equals(CANCEL));
-        Rig w = new Rig(PrecondCore.MODE_ON);
+        Rig w = new Rig();
         w.route(DC150, "C", 30000, 1200);
         w.ticks(1);
         w.v.drain();
@@ -436,7 +432,7 @@ public final class PrecondTest {
     }
 
     static void testStaleJournal() throws Exception {
-        for (int mode = 0; mode <= 2; mode++) {
+        {
             FakeVehicle v = new FakeVehicle();
             FakeJournal j = new FakeJournal();
             j.owned = true;
@@ -444,9 +440,8 @@ public final class PrecondTest {
                 public void log(String m) {}
             });
             long t = 5000;
-            c.setMode(mode, t);
             c.recover(t);
-            check("stale journal mode " + mode + ": cancel only", v.drain().equals(CANCEL));
+            check("stale journal: cancel only", v.drain().equals(CANCEL));
             v.indicator = 0;
             t += 5000;
             c.tick(t);
@@ -454,7 +449,7 @@ public final class PrecondTest {
             check("stale journal never starts", !v.drain().contains("62(2,3)"));
         }
         // cancel failing: retried, journal kept
-        Rig r = new Rig(PrecondCore.MODE_OFF);
+        Rig r = new Rig();
         r.j.owned = true;
         r.v.writeFails = true;
         r.c.recover(r.t);
@@ -465,39 +460,23 @@ public final class PrecondTest {
         check("failed cancel keeps journal", r.j.owned);
     }
 
-    static void testSwitchOff() throws Exception {
-        Rig r = new Rig(PrecondCore.MODE_OFF);
-        r.route(DC150, "Electrify America", 30000, 1200);
-        r.ticks(50);
-        check("switch off: never sends", r.v.drain().isEmpty() && r.j.writes == 0);
-        check("switch off: OFF state", r.c.state() == PrecondCore.ST_OFF);
-        check("switch off: nav data still exposed", r.c.isCharger() && r.c.chargerKw() == 150
-                && r.c.remainingMeters() == 30000);
-        r.c.setMode(PrecondCore.MODE_ON, r.t);
-        r.ticks(1);
-        check("switch on: starts", r.v.drain().equals(START_30_20));
-        r.c.setMode(PrecondCore.MODE_OFF, r.t);
-        check("switch off while active: cancel", r.v.drain().equals(CANCEL));
-        r.ticks(10);
-        check("switch off: nothing more", !r.v.drain().contains("62(2,3)"));
-    }
-
     static void testConditions() throws Exception {
-        Rig l2 = new Rig(PrecondCore.MODE_ON_NAMES);
+        Rig l2 = new Rig();
         l2.route(new int[] {35000, 11000, -1}, "Level 2", 30000, 1200);
         l2.ticks(10);
         check("L2 charger: no start", l2.v.drain().isEmpty());
 
-        Rig nm = new Rig(PrecondCore.MODE_ON);
-        nm.route(null, "Electrify America Walmart", 30000, 1200);
-        nm.ticks(10);
-        check("name match ignored in mode 1", nm.v.drain().isEmpty());
-        nm.c.setMode(PrecondCore.MODE_ON_NAMES, nm.t);
-        nm.ticks(1);
-        check("name match in mode 2 starts", nm.v.drain().equals(START_30_20)
-                && nm.c.chargerKw() == 150);
+        Rig at50 = new Rig();
+        at50.route(new int[] {35000, 50000, -1}, "50 kW", 30000, 1200);
+        at50.ticks(10);
+        check("exactly 50 kW: no start (needs > 50)", at50.v.drain().isEmpty());
 
-        Rig far = new Rig(PrecondCore.MODE_ON);
+        Rig at51 = new Rig();
+        at51.route(new int[] {35000, 51000, -1}, "51 kW", 30000, 1200);
+        at51.ticks(1);
+        check("51 kW: starts", at51.v.drain().equals(START_30_20));
+
+        Rig far = new Rig();
         far.route(DC150, "C", 150000, 90 * 60);
         far.ticks(10);
         check("outside 60 min window: no start", far.v.drain().isEmpty()
@@ -506,44 +485,44 @@ public final class PrecondTest {
         far.ticks(1);
         check("inside window: start", far.v.drain().equals("65(90) 66(59) sleep10 62(2,3) sleep130"));
 
-        Rig ho = new Rig(PrecondCore.MODE_ON);
+        Rig ho = new Rig();
         ho.v.indicator = 1;
         ho.route(DC150, "C", 30000, 1200);
         ho.ticks(10);
         check("hands off when already Active", ho.v.drain().isEmpty()
                 && ho.c.state() == PrecondCore.ST_HANDS_OFF);
 
-        Rig dis = new Rig(PrecondCore.MODE_ON);
+        Rig dis = new Rig();
         dis.v.enabled = 1;
         dis.route(DC150, "C", 30000, 1200);
         dis.ticks(10);
         check("setting disabled: no start", dis.v.drain().isEmpty());
 
-        Rig nr = new Rig(PrecondCore.MODE_ON);
+        Rig nr = new Rig();
         nr.v.ready = 0;
         nr.route(DC150, "C", 30000, 1200);
         nr.ticks(10);
         check("not READY: no start", nr.v.drain().isEmpty());
 
-        Rig fw = new Rig(PrecondCore.MODE_ON);
+        Rig fw = new Rig();
         fw.v.compatible = false;
         fw.route(DC150, "C", 30000, 1200);
         fw.ticks(10);
         check("unverified firmware: no start", fw.v.drain().isEmpty() && fw.j.writes == 0
                 && fw.c.state() == PrecondCore.ST_ERROR);
 
-        Rig jf = new Rig(PrecondCore.MODE_ON);
+        Rig jf = new Rig();
         jf.j.fail = true;
         jf.route(DC150, "C", 30000, 1200);
         jf.ticks(10);
         check("journal write failure: no start", jf.v.drain().isEmpty());
 
-        Rig near = new Rig(PrecondCore.MODE_ON);
+        Rig near = new Rig();
         near.route(DC150, "C", 150, 30);
         near.ticks(5);
         check("already at the charger: no start", near.v.drain().isEmpty());
 
-        Rig inactive = new Rig(PrecondCore.MODE_ON);
+        Rig inactive = new Rig();
         inactive.dump(sMsg(new Object[] {"C", DC150}));
         inactive.dump(pMsg(new int[][] {{30000, 1200}}));
         inactive.ticks(5);
@@ -551,7 +530,7 @@ public final class PrecondTest {
     }
 
     static void testMultiStop() throws Exception {
-        Rig r = new Rig(PrecondCore.MODE_ON);
+        Rig r = new Rig();
         r.c.onNavStatus(1, r.t);
         r.dump(sMsg(new Object[] {"Charger A", DC150, "Home", null}));
         r.dump(pMsg(new int[][] {{30000, 1200}, {300000, 12000}}));
@@ -569,7 +548,7 @@ public final class PrecondTest {
         check("multi-stop: starts again for the next charger",
                 r.v.drain().equals("65(60) 66(40) sleep10 62(2,3) sleep130"));
 
-        Rig m = new Rig(PrecondCore.MODE_ON);
+        Rig m = new Rig();
         m.c.onNavStatus(1, m.t);
         m.dump(sMsg(new Object[] {"Lunch", null, "Charger", DC150}));
         m.dump(pMsg(new int[][] {{10000, 600}}));  // no entry for stop #1
@@ -584,7 +563,7 @@ public final class PrecondTest {
     }
 
     static void testSessionStopAndChurn() throws Exception {
-        Rig r = new Rig(PrecondCore.MODE_ON);
+        Rig r = new Rig();
         r.route(DC150, "C", 30000, 1200);
         r.ticks(1);
         r.v.drain();
@@ -594,7 +573,7 @@ public final class PrecondTest {
 
         // A charger that flips in and out of the destination list: at most
         // MAX_STARTS_PER_ROUTE starts per route.
-        Rig q = new Rig(PrecondCore.MODE_ON);
+        Rig q = new Rig();
         q.route(DC150, "C", 30000, 1200);
         for (int i = 0; i < 10; i++) {
             q.ticks(1);
@@ -607,7 +586,7 @@ public final class PrecondTest {
         int starts = s.split("62\\(2,3\\)", -1).length - 1;
         check("start churn capped (" + starts + ")", starts == PrecondCore.MAX_STARTS_PER_ROUTE);
 
-        Rig e = new Rig(PrecondCore.MODE_ON);
+        Rig e = new Rig();
         e.route(DC150, "C", 30000, 1200);
         e.ticks(1);
         e.v.drain();
@@ -626,7 +605,6 @@ public final class PrecondTest {
         testTimeout();
         testCarEnds();
         testStaleJournal();
-        testSwitchOff();
         testConditions();
         testMultiStop();
         testSessionStopAndChurn();

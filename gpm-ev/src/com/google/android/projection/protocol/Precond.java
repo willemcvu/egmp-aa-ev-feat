@@ -12,7 +12,6 @@ import android.util.Log;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.lang.reflect.Method;
 import java.security.MessageDigest;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
@@ -31,16 +30,14 @@ import java.util.concurrent.TimeUnit;
  *   stop()                   GpmNaviTBTManager.destroy() (AA session end)
  *                            and SensorSource.shutdown() (GAL teardown)
  *
- * Switch persist.gpm.precond: 0/unset = parse and expose nav data only, no
- * vehicle commands; 1 = on; 2 = on + DC network name fallback. Read every
- * tick, so it takes effect within 5 s; switching to 0 cancels an active
- * request.
+ * Always on, no switch: the car's own "battery conditioning" EV setting
+ * (HEV flag 94) is the off control. Requests preconditioning for the next
+ * stop when it is a charging stop above PrecondCore.MIN_DC_KW.
  *
  * Everything runs on one HandlerThread; PrecondCore holds the logic.
  */
 public final class Precond {
     static final String TAG = "EvPrecond";
-    private static final String PROP_MODE = "persist.gpm.precond";
     private static final String JOURNAL_NAME = "evprecond.owned";
 
     private static final Object LOCK = new Object();
@@ -214,7 +211,6 @@ public final class Precond {
                 public void run() {
                     try {
                         long n = now();
-                        sCore.setMode(readMode(), n);
                         sCore.recover(n);
                         scheduleTick();
                     } catch (Throwable t) {
@@ -222,7 +218,7 @@ public final class Precond {
                     }
                 }
             });
-            Log.i(TAG, "started, mode " + readMode());
+            Log.i(TAG, "started");
             return h;
         }
     }
@@ -265,7 +261,6 @@ public final class Precond {
             sTicking = false;
             try {
                 long n = now();
-                sCore.setMode(readMode(), n);
                 sCore.tick(n);
                 scheduleTick();
             } catch (Throwable t) {
@@ -283,22 +278,6 @@ public final class Precond {
         sHandler.postDelayed(TICK, PrecondCore.REFRESH_MS);
     }
 
-    static int readMode() {
-        try {
-            Method get = Class.forName("android.os.SystemProperties")
-                    .getMethod("get", String.class, String.class);
-            String v = ((String) get.invoke(null, PROP_MODE, "0")).trim();
-            if ("1".equals(v)) {
-                return PrecondCore.MODE_ON;
-            }
-            if ("2".equals(v)) {
-                return PrecondCore.MODE_ON_NAMES;
-            }
-        } catch (Throwable t) {
-            // off
-        }
-        return PrecondCore.MODE_OFF;
-    }
 
     // ---- ownership journal -----------------------------------------------------
 

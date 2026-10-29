@@ -7,9 +7,8 @@ Planned additions, roughly in priority order. Each links to what we already know
 When Google Maps on Android Auto is guiding to a DC fast charger, ask the car to precondition the battery, as the car's own navigation does. No buttons.
 
 - **Known:** the car side is solved. `IHEVService` transactions 62/65/66 (`setBattCondEvStation`, `setBattCondRouteDis`, `setBattCondRemainTime`) are the same inputs the car's own navigation uses. Distance and time to destination already reach GPM (AA 0x8007, via Leafia's `NAVDUMP` hook).
-- **Open:** whether Maps marks a destination as a charger (`destinations[].charging_station` in AA 0x8006). This can be checked with no install: route to a charger and capture `NAVDUMP`.
 - **Design:** Java only, in GPM; start/maintain/cancel mirroring the manual Launchpad app's command profile. Details in [PRECONDITIONING.md](PRECONDITIONING.md).
-- **Status (2026-10-29):** built into the GPM dex and host-tested (`gpm-ev/test/run.sh`), not yet run on the car. Off by default: `persist.gpm.precond` 0 = parse/log only, 1 = on, 2 = on + DC network name fallback. Next: Test 1 (does Maps set `charging_station`), then PRECONDITIONING.md Test 3.
+- **Status (2026-10-29):** built into the GPM dex and host-tested (`gpm-ev/test/run.sh`), not yet run on the car. Always on, no switch (the car's battery-conditioning setting is the off control); targets charging stops above 50 kW. Test 1 done: Maps marks charging stops (power in W, planned charge time) and lists every stop; 0x8007 gives the next stop only. Next: PRECONDITIONING.md Test 3.
 
 ## 2. Drive logging for model calibration
 

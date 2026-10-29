@@ -24,8 +24,8 @@ import java.util.Locale;
  * 0x8007 carried ONE entry even with three destinations: the next stop.
  *
  * Pure Java (no Android), so it runs in the host test. Address strings are
- * only looked at transiently (DC network name match, and a hash used as the
- * in-memory identity of a stop); they are never stored or logged.
+ * only hashed transiently (the in-memory identity of a stop); they are never
+ * stored or logged.
  */
 public final class NavProto {
     /** Thrown for malformed or truncated input. */
@@ -43,20 +43,16 @@ public final class NavProto {
         public final int departureWh;      // -1 if absent
         public final int chargeSeconds;    // -1 if absent or none planned
         public final int maxPowerKw;       // field 2 W / 1000; -1 if absent
-        /** Address contains a known DC fast-charging network name. */
-        public final boolean networkMatch;
         /** Hash of the address (in memory only); 0 if no address. */
         public final int key;
 
         public Destination(int index, boolean hasStation, int departureWh,
-                int chargeSeconds, int maxPowerKw, boolean networkMatch,
-                int key) {
+                int chargeSeconds, int maxPowerKw, int key) {
             this.index = index;
             this.hasStation = hasStation;
             this.departureWh = departureWh;
             this.chargeSeconds = chargeSeconds;
             this.maxPowerKw = maxPowerKw;
-            this.networkMatch = networkMatch;
             this.key = key;
         }
     }
@@ -84,21 +80,6 @@ public final class NavProto {
             this.remaining = r;
         }
     }
-
-    /**
-     * DC fast-charging network names for the persist.gpm.precond=2 fallback.
-     * Lower case; matched as substrings of the lower-cased address.
-     */
-    static final String[] DC_NETWORKS = {
-        "electrify america",
-        "evgo",
-        "ionna",
-        "tesla supercharger",
-        "chargepoint",
-        "walmart",
-        "mercedes-benz high-power",
-        "mercedes-benz high power",
-    };
 
     private NavProto() {}
 
@@ -160,7 +141,6 @@ public final class NavProto {
             throws ParseException {
         boolean station = false;
         int dep = -1, secs = -1, kw = -1;
-        boolean network = false;
         int key = 0;
         while (r.more()) {
             int tag = r.tag();
@@ -176,7 +156,6 @@ public final class NavProto {
                 if (key == 0) {
                     key = 1;
                 }
-                network = isDcNetwork(addr);
             } else if (tag == ((2 << 3) | 2)) {
                 station = true;
                 Reader c = r.sub();
@@ -198,7 +177,7 @@ public final class NavProto {
                 r.skip(tag);
             }
         }
-        return new Destination(index, station, dep, secs, kw, network, key);
+        return new Destination(index, station, dep, secs, kw, key);
     }
 
     /** 0x8007 NextTurnDistanceEvent body: field 2 entries. */
@@ -237,18 +216,6 @@ public final class NavProto {
         return out;
     }
 
-    static boolean isDcNetwork(String addr) {
-        if (addr == null || addr.length() == 0) {
-            return false;
-        }
-        String a = addr.toLowerCase(Locale.US);
-        for (String n : DC_NETWORKS) {
-            if (a.indexOf(n) >= 0) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     static byte[] hex(String h) throws ParseException {
         int n = h.length();

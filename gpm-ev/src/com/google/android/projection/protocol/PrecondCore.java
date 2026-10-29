@@ -72,16 +72,12 @@ public final class PrecondCore {
     }
 
     // ---- constants ----------------------------------------------------------
-    public static final int MODE_OFF = 0;
-    public static final int MODE_ON = 1;
-    public static final int MODE_ON_NAMES = 2;
-
     public static final long REFRESH_MS = 5000;
     public static final long ACTIVATION_TIMEOUT_MS = 5 * 60 * 1000L;
     public static final int WINDOW_SECONDS = 60 * 60;
     public static final int ARRIVAL_METERS = 200;
+    /** Precondition for charging stops strictly above this power. */
     public static final int MIN_DC_KW = 50;
-    public static final int NAME_MATCH_KW = 150;
     public static final int MAX_STARTS_PER_ROUTE = 3;
     /** After Cancel, wait this long for the indicator to read Off. */
     public static final long CANCEL_CONFIRM_MS = 60 * 1000L;
@@ -98,8 +94,6 @@ public final class PrecondCore {
     private final Vehicle vehicle;
     private final Journal journal;
     private final Logger logger;
-
-    private int mode = MODE_OFF;
 
     // nav data
     private boolean navActive;
@@ -198,21 +192,6 @@ public final class PrecondCore {
         publish();
     }
 
-    public void setMode(int m, long now) {
-        if (m != MODE_ON && m != MODE_ON_NAMES) {
-            m = MODE_OFF;
-        }
-        if (m != mode) {
-            logger.log("mode " + mode + " -> " + m);
-            mode = m;
-            pickTarget(now);
-            if (mode == MODE_OFF && owned) {
-                cancel("switch off", now);
-            }
-        }
-        publish();
-    }
-
     /** AA NavigationState: 1 ACTIVE, 3 REROUTING count as guiding. */
     public void onNavStatus(int status, long now) {
         boolean active = status == 1 || status == 3;
@@ -282,7 +261,7 @@ public final class PrecondCore {
             tickOwned(now);
             return;
         }
-        if (mode == MODE_OFF || !navActive || target == null) {
+        if (!navActive || target == null) {
             return;
         }
         if (latched && latchedId == targetId) {
@@ -292,10 +271,6 @@ public final class PrecondCore {
     }
 
     private void tickOwned(long now) {
-        if (mode == MODE_OFF) {
-            cancel("switch off", now);
-            return;
-        }
         if (!navActive || target == null) {
             cancel(!navActive ? "route ended" : "target gone", now);
             return;
@@ -452,15 +427,9 @@ public final class PrecondCore {
         NavProto.Destination found = null;
         int kw = -1;
         for (NavProto.Destination d : dests) {
-            if (d.hasStation && d.maxPowerKw >= MIN_DC_KW) {
+            if (d.hasStation && d.maxPowerKw > MIN_DC_KW) {
                 found = d;
                 kw = d.maxPowerKw;
-                break;
-            }
-            if (mode == MODE_ON_NAMES && d.networkMatch
-                    && (!d.hasStation || d.maxPowerKw < 0)) {
-                found = d;
-                kw = NAME_MATCH_KW;
                 break;
             }
         }
@@ -610,9 +579,6 @@ public final class PrecondCore {
             } else {
                 sb.append(" -");
             }
-            if (x.networkMatch) {
-                sb.append(" name");
-            }
             sb.append(']');
         }
         return sb.toString();
@@ -624,8 +590,6 @@ public final class PrecondCore {
             s = ST_CANCELLING;
         } else if (owned) {
             s = activeSeen ? ST_ACTIVE : ST_REQUESTED;
-        } else if (mode == MODE_OFF) {
-            s = ST_OFF;
         } else if (journalBroken) {
             s = ST_ERROR;
         } else if (!navActive || target == null) {
