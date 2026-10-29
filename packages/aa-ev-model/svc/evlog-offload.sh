@@ -8,7 +8,7 @@
 # copy goes to a .tmp name, is verified with cmp, then renamed, so a pulled
 # drive never ends up with a half-written log. Logs stay on the head unit
 # (capped by EvLogger) and are never deleted from here.
-# EVLOG_ONCE=1 runs a single pass (host sandbox test).
+# EVLOG_PASSES=N stops after N passes (host sandbox test; unset = forever).
 
 export PATH=/data/nemesis/bin:/sbin:/vendor/bin:/system/sbin:/system/bin:/system/xbin
 
@@ -19,6 +19,13 @@ DRIVES="/storage/usb0 /storage/usb1 /storage/usb2 /mnt/media_rw/usb0 /mnt/media_
 
 log() {
     echo "$(date) $1" >> "$LOG" 2>/dev/null
+}
+
+# the head unit's own pop-up (same as the installer's "installed, restarting")
+toast() {
+    am broadcast -a com.hkmc.intent.action.TOAST \
+        -e com.hkmc.intent.extra.TOAST_MESSAGE "$1" \
+        --ez com.hkmc.intent.extra.TOAST_POPUPSHOWING true >/dev/null 2>&1 || true
 }
 
 # file size via ls -l (no stat/wc on the unit); empty if missing or if the
@@ -45,8 +52,9 @@ up_to_date() {
     [ -f "$2" ] && cmp "$1" "$2" >/dev/null 2>&1
 }
 
+# copies new/grown logs; sets COPIED and FAILED
 offload_to() {
-    local _dst="$1/egmp-aa-ev-logs" _f _n _tmp _done=0
+    local _dst="$1/egmp-aa-ev-logs" _f _n _tmp _done=0 _fail=0
     for _f in "$SRC"/*.csv; do
         # readable only if the logger made it so (files from before that
         # change stay private to GPM; skip them quietly)
@@ -61,19 +69,55 @@ offload_to() {
         else
             rm -f "$_tmp" 2>/dev/null
             log "copy failed: $_n -> $_dst"
+            _fail=$((_fail + 1))
         fi
     done
     if [ "$_done" -gt 0 ]; then
         sync
         log "copied $_done log(s) to $_dst"
     fi
+    COPIED=$_done
+    FAILED=$_fail
+}
+
+# drive removed: announce again on the next insertion (no sed on the unit)
+forget() {
+    local _w _new=" "
+    for _w in $ANNOUNCED; do
+        [ "$_w" = "$1" ] || _new="$_new$_w "
+    done
+    ANNOUNCED=$_new
+}
+
+# One pop-up per drive insertion (the first pass that sees the folder), so a
+# session still logging with a drive in (cars with two data ports) can't
+# keep popping up. ANNOUNCED holds the drives seen since they were inserted.
+ANNOUNCED=" "
+announce() {
+    case "$ANNOUNCED" in *" $1 "*) return 0 ;; esac
+    ANNOUNCED="$ANNOUNCED$1 "
+    if [ "$FAILED" -gt 0 ]; then
+        toast "AA EV drive logs: $COPIED copied, $FAILED failed. See /data/nemesis/aa.ev.model.offload.log."
+    elif [ "$COPIED" -gt 0 ]; then
+        toast "AA EV drive logs: $COPIED copied to the USB drive (egmp-aa-ev-logs). Safe to remove."
+    else
+        toast "AA EV drive logs: the USB drive is already up to date."
+    fi
 }
 
 log "evlog-offload started"
 while true; do
     for _d in $DRIVES; do
-        [ -d "$_d/egmp-aa-ev-logs" ] && offload_to "$_d"
+        if [ -d "$_d/egmp-aa-ev-logs" ]; then
+            offload_to "$_d"
+            announce "$_d"
+        else
+            forget "$_d"
+        fi
     done
-    [ -n "$EVLOG_ONCE" ] && exit 0
+    if [ -n "$EVLOG_PASSES" ]; then
+        EVLOG_PASSES=$((EVLOG_PASSES - 1))
+        [ "$EVLOG_PASSES" -le 0 ] && exit 0
+    fi
     sleep "$POLL_S"
 done

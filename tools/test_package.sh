@@ -86,6 +86,8 @@ exit 0
 EOF
     cat > "$S/system/bin/am" <<'EOF'
 #!/bin/bash
+# record pop-ups (toast broadcasts) for the tests
+echo "$*" >> "$(dirname "$0")/../../toast.log"
 exit 0
 EOF
     cat > "$S/system/bin/reboot" <<'EOF'
@@ -273,7 +275,7 @@ EV="$S/data/data/com.google.android.projection.sink/files/evlog"
 mkdir -p "$EV" "$S/storage/usb1/egmp-aa-ev-logs"
 printf '# egmp-aa-ev-log v1\nt_s,soc_half_pct\n0,92\n5,92\n' > "$EV/egmp-NEEV-20261029-001.csv"
 run_offload() {
-    ( cd "$S/data/nemesis/apps/aa.ev.model" && EVLOG_ONCE=1 \
+    ( cd "$S/data/nemesis/apps/aa.ev.model" && EVLOG_PASSES=${PASSES:-1} \
         PATH="$S/system/xbin:$S/system/bin:$S/data/nemesis/bin:$PATH" \
         /bin/bash svc/evlog-offload.sh 2>&1 )
 }
@@ -291,6 +293,14 @@ echo "10,91" >> "$EV/egmp-NEEV-20261029-001.csv"
 run_offload > "$T/s9.3.log"
 cmp "$EV/egmp-NEEV-20261029-001.csv" "$S/storage/usb1/egmp-aa-ev-logs/egmp-NEEV-20261029-001.csv" >/dev/null 2>&1
 check "grown log copied again" $?
+grep -q "1 copied to the USB drive" "$S/toast.log" 2>/dev/null
+check "pop-up after copying" $?
+# one pop-up per insertion: several passes with the drive in, one pop-up
+rm -f "$S/toast.log"
+echo "15,91" >> "$EV/egmp-NEEV-20261029-001.csv"
+PASSES=3 run_offload > /dev/null
+[ "$(grep -c TOAST "$S/toast.log" 2>/dev/null)" = 1 ]
+check "one pop-up per insertion across passes" $?
 
 echo
 echo "passed: $pass, failed: $fail"

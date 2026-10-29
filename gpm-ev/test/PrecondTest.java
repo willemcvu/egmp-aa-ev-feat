@@ -381,19 +381,29 @@ public final class PrecondTest {
     }
 
     static void testTimeout() throws Exception {
+        // No "no Active" timeout: the BMS times the heating itself, so a
+        // request for a charger 30-60 min away stays up and is maintained.
         Rig r = new Rig();
         r.route(DC150, "C", 30000, 1200);
         r.ticks(1);
         r.v.drain();
-        r.ticks(59);  // 4 min 55 s after start
+        r.ticks(50 * 12);  // 50 min pending, car never Active
         String s = r.v.drain();
-        check("maintaining while pending", s.startsWith("65(30) 66(20)") && !s.contains("2047"));
-        r.ticks(1);  // 5 min
-        check("cancel after 5 min without Active", r.v.drain().equals(CANCEL));
-        r.ticks(30);
-        check("no restart after timeout", r.v.drain().isEmpty()
-                && r.c.state() == PrecondCore.ST_DONE && !r.j.owned);
-        // timeout also applies when status reads fail
+        check("pending 50 min: still maintained, never cancelled",
+                s.startsWith("65(30) 66(20)") && !s.contains("2047")
+                && r.c.state() == PrecondCore.ST_REQUESTED && r.j.owned);
+        r.dump(pMsg(new int[][] {{150, 10}}));
+        r.ticks(1);
+        check("late arrival still cancels", r.v.drain().equals(CANCEL));
+        // the BMS starting late is picked up
+        Rig late = new Rig();
+        late.route(DC150, "C", 30000, 1200);
+        late.ticks(30 * 12);
+        late.v.indicator = 1;
+        late.ticks(1);
+        check("Active after 30 min pending -> ACTIVE",
+                late.c.state() == PrecondCore.ST_ACTIVE);
+        // unreadable car status still bounds a request
         Rig q = new Rig();
         q.route(DC150, "C", 30000, 1200);
         q.ticks(1);
@@ -402,7 +412,7 @@ public final class PrecondTest {
         q.ticks(59);
         check("no maintain on unknown status", q.v.drain().isEmpty());
         q.ticks(1);
-        check("timeout with unreadable status", q.v.drain().equals(CANCEL));
+        check("cancel after 5 min of unreadable status", q.v.drain().equals(CANCEL));
     }
 
     static void testCarEnds() throws Exception {

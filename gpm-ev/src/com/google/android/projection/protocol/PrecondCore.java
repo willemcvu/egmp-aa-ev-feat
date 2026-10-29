@@ -73,7 +73,13 @@ public final class PrecondCore {
 
     // ---- constants ----------------------------------------------------------
     public static final long REFRESH_MS = 5000;
-    public static final long ACTIVATION_TIMEOUT_MS = 5 * 60 * 1000L;
+    /**
+     * Cancel when the car's status (READY, setting, indicator) can't be read
+     * for this long. There is no "no Active" timeout: the BMS times the
+     * heating itself from the distance/time we keep sending, so a request
+     * for a charger 30-60 min away legitimately stays pending for a while.
+     */
+    public static final long STATUS_TIMEOUT_MS = 5 * 60 * 1000L;
     public static final int WINDOW_SECONDS = 60 * 60;
     public static final int ARRIVAL_METERS = 200;
     /** Precondition for charging stops strictly above this power. */
@@ -121,6 +127,7 @@ public final class PrecondCore {
     private int cancelTries;
     private long cancelAt;
     private boolean journalBroken;
+    private long lastStatusOk;
     private String waitReason = "";
 
     // published for other threads
@@ -187,6 +194,7 @@ public final class PrecondCore {
             logger.log("stale ownership journal: cancelling (no start)");
             owned = true;
             startedAt = now;
+            lastStatusOk = now;
             cancel("recovery", now);
         }
         publish();
@@ -286,19 +294,19 @@ public final class PrecondCore {
             ready = vehicle.readReady();
             indicator = vehicle.readIndicator();
         } catch (Exception e) {
-            // Unknown feedback never prolongs a pending request.
-            if (!activeSeen && now - startedAt >= ACTIVATION_TIMEOUT_MS) {
-                cancelAndLatch("no Active within 5 min", now);
+            // Never hold a request we can't see: unreadable status for
+            // STATUS_TIMEOUT_MS cancels it.
+            if (now - lastStatusOk >= STATUS_TIMEOUT_MS) {
+                cancelAndLatch("car status unreadable for 5 min", now);
             }
             return;
         }
+        lastStatusOk = now;
         if (indicator == 1 && !activeSeen) {
             activeSeen = true;
-            logger.log("car reports conditioning Active");
-        }
-        if (!activeSeen && now - startedAt >= ACTIVATION_TIMEOUT_MS) {
-            cancelAndLatch("no Active within 5 min", now);
-            return;
+            logger.log("car reports conditioning Active after "
+                    + (now - startedAt) / 1000 + " s, " + km(r == null ? -1 : r.meters)
+                    + " km / " + minutes(r == null ? -1 : r.seconds) + " min to go");
         }
         if (ready == 0) {
             cancelAndLatch("not READY", now);
@@ -383,6 +391,7 @@ public final class PrecondCore {
         owned = true;
         activeSeen = false;
         startedAt = now;
+        lastStatusOk = now;
         startsThisRoute++;
         int km = km(r.meters), min = minutes(r.seconds);
         logger.log("start: " + km + " km, " + min + " min, " + targetKw + " kW");

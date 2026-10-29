@@ -9,6 +9,7 @@ The allowlist of header keys and columns is single-sourced in [`site/schema.json
 - One CSV file per Android Auto session. UTF-8, `\n` line endings.
 - Name: `egmp-<product-short>-<YYYYMMDD>-<seq>.csv`, e.g. `egmp-NEEV-20261029-001.csv`. `<product-short>` is the first dot-separated part of `product` (`NEEV`); `<YYYYMMDD>` is `date`; `<seq>` counts sessions from 1, at least three digits. The cleaners name their output this way, so an original file name never ends up in a submission.
 - Copied by the head unit to `<usb drive>/egmp-aa-ev-logs/` when a drive with that folder is plugged in.
+  A head-unit pop-up confirms it once per insertion ("N copied … Safe to remove", or "already up to date").
 
 ```
 # egmp-aa-ev-log v1
