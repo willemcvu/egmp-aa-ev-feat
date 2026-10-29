@@ -18,7 +18,7 @@ Evidence labels:
 | BMS SOH | hscan `0xd6 getXEV_Bms_GDS_SOH()` | % (1 byte) | proven decode | **health index, not capacity** (owner). Returns 95 |
 | Display SOC | HEV `0x19 DISPLAY_SOC`; nav packet byte 0 | 0.5 % | proven | BMS (real) SOC is parsed by hscan but **not exposed** |
 | Pack min temp | nav packet byte 1 (`XEV_MIN_BATT_TEMP`) | °C, signed byte | proven | no pack max temp exposed on GEN3 |
-| **Outside temp** | nav packet byte 6 (`int[4]` `DATC_OUT_TEMP_SNSR`) | **raw × 0.5 − 40 °C** | strong | `(byte)d[4]` is wrong. Also in `dumpsys` of the DATC service |
+| **Outside temp** | nav packet byte 6 (`int[4]` `DATC_OUT_TEMP_SNSR`) | **raw × 0.5 − 40 °C** | proven (matches the dash, 2026-10-29) | `(byte)d[4]` is wrong. Also in `dumpsys` of the DATC service |
 | Vehicle speed | hscan `0xb getCarSpeed(byte unit)`; BCM `getSpeed_KMHUnit`; ISystemService `onVehicleSpeedChanged` (GPM) | km/h or mph (hscan/BCM) | proven (hscan) | hscan: display speed ×0.5, then unit conversion |
 | Odometer | hscan `0x1 getOdometer(byte)`; BCM `0x27 getOdometer(byte)`; HEV `0x1f ODOMETER` | km/mi float; HEV raw 0.1 | proven (hscan ×0.1) | personal-ish |
 | Live climate power | HEV `0x4f DATC_CLMTPWRCNSMPTN_W` (pushed at 10 Hz) | raw 0–56; ~20 W/unit? | inferred units | the older `0x33`/`0x34` stay 0 on this car (CAN-FD variants are `0x4f`/`0x42`) |
@@ -86,7 +86,7 @@ Interpretation (inferred):
 - Wh per % rises with pack voltage, so a 24→46 % slope underestimates a full-window capacity by a few percent. Expect ~66–68 kWh. That is still well under 77.4.
 - The 2 Wh unit isn't proven. The probe plan pins it with a charge, where ΔENERGYMAP vs charger kWh × η ≈ 0.95 confirms 2 Wh.
 
-**What this changes:**
+**What this changes** *(implemented in v0.2.0: `EvModelSender` sends ENERGYMAP × 2 as `1.3` and learns `1.4`; ~62.9 kWh on the owner's car)*:
 - Model field `1.3` (current Wh) should come straight from `ENERGYMAP × 2`, not `DISPLAY_SOC × 77400`. Tonight that's 28.9 kWh vs the 35.6 kWh sent.
 - Capacity `1.4` should come from a learned `ENERGYMAP×2 / (SOC/100)` at high SOC (or a fit across a charge), with outliers rejected.
 - Keep `1.4 ≥ 1.3`, and keep the battery % Maps shows consistent with the cluster. If `1.4` = learned capacity and `1.3` = ENERGYMAP×2, Maps' % ≈ display SOC.
@@ -111,7 +111,7 @@ Interpretation (inferred):
 hscan `getXEV_Bms_GDS_SOH()` (txn 0xd6) → `CanGEN3CsmEv.parseBMS_26_500ms_2`: `xEV_Bms_GDS_SOH = f[8]`, a **single raw byte, no scale**. Only the GEN3 CSM fills it (all other generations return 0), so this car is GEN3.
 - With IGN off and IGN3 off, it returns the value saved in the drive-segment file.
 - It reads 95. Per the owner that's a health index, not capacity. Don't use it for capacity.
-- `EvModelSender`'s "0.1 % units in [500, 1000]" gate can never fire (1 byte, max 255). That's harmless, since the gate is off by default, but it's dead code.
+- `EvModelSender`'s "0.1 % units in [500, 1000]" gate can never fire (1 byte, max 255). That's harmless, since the gate is off by default, but it's dead code. *(Removed: the SOH capacity path and its setting are gone; SOH is only logged.)*
 
 ### 1.4 Display SOC vs BMS SOC
 
@@ -135,7 +135,7 @@ Neither has a getter on `ITM_HSCANService`, and hscan has no `dump()`. Pack max 
   const-wide/high16 v3, 0x3fe0...  # 0.5   mul-double
   const-wide/high16 v3, 0x4044...  # 40.0  sub-double
   ```
-  Capture 2026-10-27 22:00 (late-October night, Vermont): raw alternates 0x4c/0x4d (76/77) → **−2.0 / −1.5 °C**. That's plausible, and the ±1 LSB jitter fits a 0.5 °C sensor. Tonight's value that failed the `(byte)` −45..55 check is consistent with raw > 55 (> −12.5 °C). **Fix: `outC = (d[4] & 0xff) * 0.5 − 40`, invalid if raw ≥ 0xFE** (strong). Confirm against the dash (probe P3).
+  Capture 2026-10-27 22:00 (late-October night): raw alternates 0x4c/0x4d (76/77) → **−2.0 / −1.5 °C**. That's plausible, and the ±1 LSB jitter fits a 0.5 °C sensor. Tonight's value that failed the `(byte)` −45..55 check is consistent with raw > 55 (> −12.5 °C). **Fix: `outC = (d[4] & 0xff) * 0.5 − 40`, invalid if raw ≥ 0xFE** (strong). Confirm against the dash (probe P3). *(Confirmed 2026-10-29: the logged value matched the dash, 48 °F.)*
 - **DATC service**: `DatcBypassStatus.getOutTempC()/getOutTempF()` are filled from the raw MICOM bytes (`UNIDatcProtocol.setAllDatcResp`: b0 = C, b1 = F). The object isn't exposed over IDATCService, only printed by `dumpsys` (`DATCService.dumpDatcSignal`). `dumpsys <datc service>` printing both OutTempC and OutTempF raws cross-checks the scaling.
 - HEV/hscan: on GEN3, hscan never fills `CR_Datc_OutTemp_C`. There's no HEV flag for it.
 
@@ -224,6 +224,8 @@ First: `adb shell service list | grep -iE 'hkmc|hscan'` to confirm the service n
 | P10 | `service call tm_hscan_service 47` (VIN). **Personal: don't commit the output** | VIN source works |
 
 ## Recommended logging changes (for `EvModelSender`)
+
+*(All implemented in v0.2.0; see `EvModelSender` and [LOGGING.md](LOGGING.md). The trip sums are logged every 5 s row, not once a minute, and capacity uses a smoothed estimate preferring ≥ 60 % samples rather than a median.)*
 
 1. Log `ENERGYMAP_1000MS` (HEV 0x31) every period. Treat 0xFFFF as invalid. Use `×2 Wh` for model `1.3`.
 2. Fix the outside temp: `(d[4] & 0xff) * 0.5 − 40`.

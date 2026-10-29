@@ -1,36 +1,38 @@
 # Roadmap
 
-Planned additions, roughly in priority order. Each links to what we already know.
+Planned additions, roughly in priority order. Each links to what we already know. Items 1–3 are built and verified on the car (2022 Ioniq 5, 2026-10-29, v0.2.0).
 
-## 1. Automatic battery preconditioning
+## 1. Automatic battery preconditioning (done)
 
 When Google Maps on Android Auto is guiding to a DC fast charger, ask the car to precondition the battery, as the car's own navigation does. No buttons.
 
-- **Known:** the car side is solved. `IHEVService` transactions 62/65/66 (`setBattCondEvStation`, `setBattCondRouteDis`, `setBattCondRemainTime`) are the same inputs the car's own navigation uses. Distance and time to destination already reach GPM (AA 0x8007, via Leafia's `NAVDUMP` hook).
-- **Design:** Java only, in GPM; start/maintain/cancel mirroring the manual Launchpad app's command profile. Details in [PRECONDITIONING.md](PRECONDITIONING.md).
-- **Status (2026-10-29):** built into the GPM dex and host-tested (`gpm-ev/test/run.sh`), not yet run on the car. Always on, no switch (the car's battery-conditioning setting is the off control); targets charging stops above 50 kW. Test 1 done: Maps marks charging stops (power in W, planned charge time) and lists every stop; 0x8007 gives the next stop only. Next: PRECONDITIONING.md Test 3.
+- **How:** `IHEVService` transactions 62/65/66 (`setBattCondEvStation`, `setBattCondRouteDis`, `setBattCondRemainTime`), the same inputs the car's own navigation uses, with distance and time from Maps' navigation messages (0x8006/0x8007, via Leafia's `NAVDUMP` hook). Java only, in GPM, mirroring the manual Launchpad app's command profile. Details in [PRECONDITIONING.md](PRECONDITIONING.md).
+- **Status (2026-10-29): verified on the car.** Always on, no switch (the car's battery-conditioning setting is the off control). Triggers when the next stop is a charging stop above 50 kW at most 60 min away. On short routes the request goes REQUESTED → ACTIVE (the car's indicator comes on); ending the route cancels it (Off within ~2.5 s); on a 58-min route it stays REQUESTED while the BMS waits to heat.
+- **Still open:** a real multi-stop drive (is the single 0x8007 entry always the next stop?), a cold-morning drive to a charger, and wireless AA.
 
-## 2. Drive logging for model calibration
+## 2. Drive logging for model calibration (logging done, analysis next)
 
-The model is calibrated from a few owner anchor points. Real logged drives would let us fit it properly (cold penalty split, drivetrain losses, real capacity).
+The model is calibrated from a few owner anchor points. Real logged drives let us fit it properly (cold penalty split, drivetrain losses, real capacity).
 
-- **Goal:** the head unit logs on its own, and the logs are copied off automatically when a USB drive is plugged in. No ADB, no laptop in the car.
-- **What to log** (every 5 s while AA is connected, from data `EvModelSender` already reads): SOC, outside temp, min pack temp, `EV_AVLBL_ENRG`, DTE, the model values sent (capacity, road load A), and AA nav remaining distance/time. Ideally also speed and odometer if a source is found. No GPS position by default (privacy); maybe opt-in.
-- **Storage:** compact CSV under `/data/nemesis/`, rotated with a hard size cap so it can never fill `/data`.
-- **Offload:** on USB insert, copy to `<drive>/egmp-aa-ev-logs/` and mark what's been copied. Needs a small NEMESIS service watching `/storage/usb*` (not the NEMESIS usb-handler).
-- **Analysis:** a host tool that turns logs into Wh/mi against speed and temperature and refits the cold tables (`COLD_DELTA_A`, aux table).
-- **Status (2026-10-29):** built on `dev/logging-capacity`, not yet run on the car. `EvLogger` writes format v1 ([LOGGING.md](LOGGING.md)) into GPM's files dir (32 MB cap); `svc/evlog-offload.sh` copies to drives with an `egmp-aa-ev-logs/` folder. Checker site in `site/`, `tools/evlog.py`. Still to build: the analysis/refit tool.
+- **Goal:** the head unit logs on its own, and the logs are copied off when a USB drive is plugged in. No ADB, no laptop in the car.
+- **Status (2026-10-29): verified on the car.** `EvLogger` writes format v1 ([LOGGING.md](LOGGING.md)) every 5 s into GPM's files dir (32 MB cap). `svc/evlog-offload.sh` copies new logs to any drive with an `egmp-aa-ev-logs/` folder and shows a head-unit pop-up once per insertion (6 logs copied in the first test). On this car the phone and the drive share the one USB data port, so logs are copied when the drive is plugged in after a session. Checker site in `site/`, `tools/evlog.py`.
+- **Still to build:** the analysis tool that turns logs into Wh/mi against speed and temperature and refits the cold tables (`COLD_DELTA_A`, aux table). That is the input to item 4.
 
-## 3. Real usable capacity
+## 3. Real usable capacity (done)
 
-The model assumes the new-car 77.4 kWh. At ~100k miles the real usable capacity is probably lower, so Maps overestimates range.
+The model assumed the new-car 77.4 kWh. At ~105k miles the real usable capacity is lower, so Maps overestimated range.
 
-- **Approach (built, not yet run on the car):** usable capacity = BMS remaining energy ÷ display SOC. HEV flag 0x31 `ENERGYMAP_1000MS` is the same signal as the nav packet's `EV_AVLBL_ENRG`, in 2 Wh steps like `BMS_EVENERGYCAPA` ([DATA-SOURCES.md](DATA-SOURCES.md) §1.1). Owner's car: 14462 at 46.0% → 28.9 kWh → **~62.9 kWh usable**. The energy sent to Maps is ENERGYMAP × 2 directly; capacity is learned (preferring ≥ 60% SOC samples, since energy reaches 0 near display 2%) and kept across sessions. No setting.
+- **How:** usable capacity = BMS remaining energy ÷ display SOC. HEV flag 0x31 `ENERGYMAP_1000MS` is the same signal as the nav packet's `EV_AVLBL_ENRG`, in 2 Wh steps like `BMS_EVENERGYCAPA` ([DATA-SOURCES.md](DATA-SOURCES.md) §1.1). The energy sent to Maps is ENERGYMAP × 2 directly; capacity is learned (preferring ≥ 60% SOC samples, since energy reaches 0 near display 2%) and kept across sessions. The charge curve and time tables are scaled to it. No setting.
+- **Status (2026-10-29): verified on the car.** ~62.9 kWh usable on the owner's pack (from BMS energy ÷ SOC), and with the tables scaled to it Maps' charge times look right to the owner.
 - **Not capacity:** BMS SOH (hscan 0xd6, reads 95) is a health index (resistance, balance); logged only. `BMS_EVENERGYCAPA` (0x35) is a constant 38700 (77.4 kWh nominal).
-- **To confirm:** the 2 Wh unit with a logged charge (ΔENERGYMAP × 2 vs charger kWh × ~0.95, DATA-SOURCES.md probe P2), and the high-SOC capacity from a near-full log.
+- **Open question:** recent Electrify America sessions suggest ~70–71 kWh (several deep sessions delivered more than 62.9 kWh would allow). Settle it with a logged DC charge: ΔENERGYMAP × 2 vs charger kWh × ~0.95 (DATA-SOURCES.md probe P2), and ENERGYMAP × 2 ÷ SOC near full.
+
+## 4. Self-adjusting model (next)
+
+Use the drive logs (item 2) to correct the model on the car: compare predicted and actual energy use per drive and adjust road load / aux power, so the model follows the actual car, season and tyres without manual recalibration. Start offline (the analysis tool refits the tables from submitted logs), then consider a slow on-car correction with tight bounds.
 
 ## To verify (existing features)
 
-- Wireless Android Auto with EV routing (tested wired only).
+- Wireless Android Auto with EV routing, preconditioning and logging (tested wired only).
 - Supercharger charge times: does Maps use the 250 kW table row for Tesla stations?
-- Cold model on the car: the log's `out=` (now raw × 0.5 − 40 °C) matches the dash, and Maps adds a stop on the Burlington → Syracuse trip at ~26 °F.
+- Cold model on a real winter trip: does Maps add the stop the warm model missed at ~26 °F? (Outside temperature itself is confirmed: raw × 0.5 − 40 °C matches the dash.)

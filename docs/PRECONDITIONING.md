@@ -1,6 +1,6 @@
 # Automatic battery preconditioning from Google Maps (Android Auto)
 
-Date: 2026-10-28 (research); implementation 2026-10-29, built and host-tested, **not yet run on the car** (see [Implementation](#implementation)). Car: 2022 Ioniq 5, Gen5W `NEEV.USA.0000.V015.012.260507`, NEMESIS + Leafia v1.0.5 + our EV-model patch (`HANDOFF.md`).
+Date: 2026-10-28 (research); implementation 2026-10-29, **verified on the car 2026-10-29** (v0.2.0, see [Implementation](#implementation) and [Test 3](#test-3-automatic-mode-after-building)). Car: 2022 Ioniq 5, Gen5W `NEEV.USA.0000.V015.012.260507`, NEMESIS + Leafia v1.0.5 + our EV-model patch (`HANDOFF.md`).
 
 Goal: when Google Maps on Android Auto is guiding to a DC fast charger (the destination, or a charging stop Maps added), the car preconditions the battery the way it does for its own navigation. No buttons.
 
@@ -38,7 +38,7 @@ It doesn't touch CAN directly. It does exactly what the car's own navigation doe
 
 The app also has a 5-minute timeout if the car never reports Active, crash recovery that only ever cancels, and a rule that Start needs READY + the setting enabled + indicator Off.
 
-Caveat from its own docs: at publication the **Ioniq 5 profile had not been verified in a parked car**. The field tests (Off → Active → Off) were on an EV6 with the same 260507 software family. If you've run it on your Ioniq 5 and seen it go Active, that closes this gap.
+Caveat from its own docs: at publication the **Ioniq 5 profile had not been verified in a parked car**. The field tests (Off → Active → Off) were on an EV6 with the same 260507 software family. *(Closed 2026-10-29: our automatic mode, which reuses this profile, went Off → Active → Off on the owner's 2022 Ioniq 5.)*
 
 ### What those transactions are in the firmware
 
@@ -130,13 +130,14 @@ Risk: same class as the EV-model patch. If GPM throws, AA stops working, and uni
 
 ## Implementation
 
-Built 2026-10-29 into the same GPM `classes.dex` as the EV-model patch (`tools/build_all.sh`). Host-tested only.
+Built 2026-10-29 into the same GPM `classes.dex` as the EV-model patch (`tools/build_all.sh`). Host-tested, then verified on the car the same day (build test7, wired AA).
 
 **Code** (`gpm-ev/src/com/google/android/projection/protocol/`):
 
 - `NavProto`: minimal protobuf reader for the `S` (0x8006) and `P` (0x8007) NAVDUMP strings. Returns destinations (index, charging stop present, departure Wh, charger kW from field 2's watts, planned charging seconds) and {metres, seconds} entries. Rejects truncated payloads (declared length must match the hex). Addresses are never stored or logged. Only a hash is kept in memory, as the stop's identity.
 - `PrecondCore`: the decision logic, pure Java, with the car, journal and log behind interfaces.
-- `Precond`: Android shell. One `HandlerThread` (`EvPrecond`), binder access (Launchpad's `OemVehicleClient` checks, commands only when SHA-256 of `automotive.odex` / `automotive-service.odex` match our `private/car-neev-260507` copies, since those files define the transaction numbers; no device-name check. The first car test (2026-10-29) was blocked only by Launchpad's device-name check (it names the 2023 unit, `…neev23_us`; the owner's 2022 is `…neev_us` with identical framework files); READY, the conditioning setting and the indicator all passed, the ownership journal `files/evprecond.owned` in GPM's data dir, and static getters (`navActive()`, `remainingMeters()`, `remainingSeconds()`, `isCharger()`, `chargerKw()`, `state()`/`stateName()`) for a logger.
+- `Precond`: Android shell. One `HandlerThread` (`EvPrecond`); binder access modelled on Launchpad's `OemVehicleClient`; the ownership journal `files/evprecond.owned` in GPM's data dir; static getters (`navActive()`, `remainingMeters()`, `remainingSeconds()`, `isCharger()`, `chargerKw()`, `state()`/`stateName()`) for the drive logger.
+- **Firmware check:** commands are sent only when the SHA-256 of `/system/framework/automotive.odex` and `automotive-service.odex` match our `private/car-neev-260507` copies (and SDK 19), since those files define the transaction numbers. There is no device-name check: the first car test was blocked only by Launchpad's device-name check, which names the 2023 unit (`…neev23_us`), while the owner's 2022 is `…neev_us` with identical framework files.
 
 **Hooks** (`tools/patch_gpm_smali.py`; every call is wrapped in a catch-all, so a Precond failure can't break navigation):
 
@@ -164,19 +165,19 @@ Built 2026-10-29 into the same GPM `classes.dex` as the EV-model patch (`tools/b
 
 **Log** (`adb logcat -s EvPrecond`): `started`; `nav active (1)`; `dests n=2 [0: station kw=350 dep=77400Wh chg=1432s] [1: -]`; `target: stop #1, 150 kW`; `waiting: <reason>`; `start: 30 km, 20 min, 150 kW`; `car reports conditioning Active`; `cancel: <reason>`; `cancel confirmed: car reports Off`; `state A -> B`. No addresses.
 
-**Tests:** `sh gpm-ev/test/run.sh` (JVM, fake vehicle/journal; `VERBOSE=1` prints the log). 82 checks:
+**Tests:** `sh gpm-ev/test/run.sh` (JVM, fake vehicle/journal; `VERBOSE=1` prints the log). `PrecondTest`, 82 checks:
 
 - NavProto on the real 0x8007 payload, and on the real 0x8006 payload with its place names replaced by same-length placeholders. Non-charger: never starts.
-- Charger routes shaped like the captured ones: start profile exact; maintain without 62; cancel on arrival, route end, session end, target -> non-charger or L2, 5-minute timeout, READY lost, setting disabled, Active -> Off. Exactly 50 kW never starts; 51 kW does.
+- Charger routes shaped like the captured ones: start profile exact; maintain without 62; cancel on arrival, route end, session end, target -> non-charger or L2, car status unreadable for 5 min, READY lost, setting disabled, Active -> Off. A request that stays REQUESTED for over 5 min is **not** cancelled. Exactly 50 kW never starts; 51 kW does.
 - Rerouting keeps the request. Multi-stop picks the right index. Window, hands-off, firmware mismatch and journal failure each block Start. Stale journal cancels only. Failed cancel is retried. Start churn is capped.
 
-**Verified:** host logic, the build, and that the package sandbox test still passes.
+**Verified on the car (2026-10-29, wired AA):** the hooks run; the firmware check passes; short routes to a DC charger go REQUESTED → ACTIVE with the car's indicator on; ending the route cancels and the car reads Off within ~2.5 s; a 58-min route stays REQUESTED (the BMS waits to heat). Host logic, the build and the package sandbox test also pass.
 
 **Not verified:**
 
 - that the single 0x8007 entry is the next stop on a real multi-stop drive (Test 1 strongly suggests it);
-- the 62/65/66 profile on this Ioniq 5 (Launchpad's field tests were on an EV6);
-- the hooks running on the car (dexopt verification, threads).
+- cancel on arrival, session end and setting-off on the car (host-tested);
+- a cold-morning drive where the BMS heats en route; wireless AA.
 
 ## 4. Tests
 
@@ -209,7 +210,7 @@ So `.2` is the energy-forecast "charging station details" shape: departure energ
 
 ### Test 2: car-side command on your Ioniq 5 (only if the manual app hasn't been confirmed on your car)
 
-Run the manual Launchpad app once, cold battery, and confirm the indicator goes Active (Launchpad shows it). That validates the 62/65/66 profile on NEEV, which the automatic mode reuses.
+Run the manual Launchpad app once, cold battery, and confirm the indicator goes Active (Launchpad shows it). That validates the 62/65/66 profile on NEEV, which the automatic mode reuses. *(Superseded: Test 3 showed Active directly with the automatic mode.)*
 
 ### Test 3: automatic mode (after building)
 
@@ -223,11 +224,13 @@ Install the package built with this code. Phone Bluetooth off, `adb logcat -v ti
 
 If anything goes wrong: switch off battery conditioning in the car's EV settings (takes effect within 5 s), or uninstall the package.
 
+**Result (2026-10-29, build test7, wired AA, steps 2–4):** short charger routes went `start` → `REQUESTED` → `car reports conditioning Active` with the car's indicator on; ending the route gave `cancel: route ended` and the car read Off within ~2.5 s; a 58-min route stayed REQUESTED (no heating yet). Step 5 (a cold-morning drive) is still to do.
+
 ## Open questions
 
 - Manually added charger stops (Test 1 step 4) weren't captured; (a) a charger destination and (b) Maps-planned stops both carry `.2`.
 - Confirm on a real multi-stop drive that the single 0x8007 entry is the next stop (the drive log records `nav_rem_m` alongside the stops).
 - Exact meaning of station flag 2 / type 3, and whether the BMS uses distance, time or both. Tyler Harvey's Ioniq5_CAN `preconditioning_messages` logs might help.
-- Does Leafia's NAVDUMP pass payloads of any length? Ours were 36–69 bytes. Multi-step routes with lanes will be longer.
+- Does Leafia's NAVDUMP pass payloads of any length? Payloads up to 136 bytes arrived intact (Test 1); multi-step routes with lanes will be longer.
 - What "PDK 5.1" corresponds to, and whether 0x8008 is reachable at all.
 - Leafia could drop the NAVDUMP log in a future version. Our patch should keep its own copy of that path or gate on the Leafia md5s, as the EV-model package does.

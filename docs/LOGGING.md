@@ -9,7 +9,7 @@ The allowlist of header keys and columns is single-sourced in [`site/schema.json
 - One CSV file per Android Auto session. UTF-8, `\n` line endings.
 - Name: `egmp-<product-short>-<YYYYMMDD>-<seq>.csv`, e.g. `egmp-NEEV-20261029-001.csv`. `<product-short>` is the first dot-separated part of `product` (`NEEV`); `<YYYYMMDD>` is `date`; `<seq>` counts sessions from 1, at least three digits. The cleaners name their output this way, so an original file name never ends up in a submission.
 - Copied by the head unit to `<usb drive>/egmp-aa-ev-logs/` when a drive with that folder is plugged in.
-  A head-unit pop-up confirms it once per insertion ("N copied … Safe to remove", or "already up to date").
+  A head-unit pop-up confirms it once per insertion ("N copied … Safe to remove", or "already up to date"). On the 2022 Ioniq 5 the phone and the drive share the one USB data port, so plug the drive in after a session. Logs stay on the head unit (32 MB cap, oldest deleted first) and are never deleted by the copy.
 
 ```
 # egmp-aa-ev-log v1
@@ -39,15 +39,15 @@ Lines starting with `# `, each `# key=value`. The first line is exactly `# egmp-
 | `vin_model` | VIN characters 1–8 plus character 10 (maker, model, body, motor, model year). **Never the full VIN**: no check digit (9), plant (11) or serial number (12–17) | `KM8KRDAFN` |
 | `pkg` | logging package and version | `aa.ev.model 0.2.0` |
 | `model_capacity_wh` | capacity sent to Maps, Wh | `77400` |
-| `capacity_source` | where that capacity came from: `nominal` (new-car value), `soh`, `bms` (learned from BMS available energy ÷ SOC), … | `nominal` |
+| `capacity_source` | where that capacity came from: `nominal` (new-car value, nothing learned yet) or `bms` (learned from BMS available energy ÷ SOC). Readers should accept other short lower-case values | `nominal` |
 | `date` | UTC date the session started, `YYYY-MM-DD`. No time of day | `2026-01-17` |
 | `period_s` | sample period, s | `5` |
 
-There is deliberately no time zone or time of day. The current logger writes all of these except `vin_model`.
+There is deliberately no time zone or time of day. The logger writes all of these; `vin_model` is left out if the VIN can't be read.
 
 ## Data
 
-After the header: one CSV row of column names, then one row per sample. Units are in the column names. Values are numbers (plain decimal; `int` and `0/1` columns as noted), except `model_rev`, a short lower-case hex string. **An empty field means unknown.** Columns may appear in any order in a raw log; cleaned logs use the order below, which is also the order the logger writes (it currently writes `t_s` … `model_rev` minus `pack_max_c`).
+After the header: one CSV row of column names, then one row per sample. Units are in the column names. Values are numbers (plain decimal; `int` and `0/1` columns as noted), except `model_rev`, a short lower-case hex string. **An empty field means unknown.** Columns may appear in any order in a raw log; cleaned logs use the order below (the `site/schema.json` order). The logger writes the columns from `t_s` through `precond_state` in this order; the ones after it (`pack_max_c` … `drive_mode_raw`) are reserved: no source on this car yet.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -58,7 +58,7 @@ After the header: one CSV row of column names, then one row per sample. Units ar
 | `avlbl_enrg_raw` | number | `EV_AVLBL_ENRG` from the nav battery packet, raw |
 | `out_temp_raw` | number | outside temperature, raw car value |
 | `out_temp_c` | number | outside temperature, °C |
-| `pack_min_c`, `pack_max_c` | number | lowest/highest battery module temperature, °C |
+| `pack_min_c` | number | lowest battery module temperature, °C |
 | `dte_raw` | number | car's distance to empty, raw |
 | `road_a_n` | number | road-load A sent to Maps, N |
 | `aux_table_c` | number | temperature used for the model table lookup, °C |
@@ -66,9 +66,6 @@ After the header: one CSV row of column names, then one row per sample. Units ar
 | `model_rev` | hex string `[0-9a-f]{4,16}` | energy model revision, e.g. `3fa9c2d1` |
 | `speed_kph` | number | speed, km/h |
 | `odo_delta_km` | number | distance since session start, km. **Never the absolute odometer** |
-| `batt_v`, `batt_a`, `batt_kw` | number | HV battery voltage, current, power |
-| `hvac_w` | number | climate power, W |
-| `hvac_raw` | number | climate power or state, raw |
 | `trip_batt_raw` | int | HEV 0x58 battery energy used this drive, 0.1 kWh (resets each drive) |
 | `trip_clim_raw` | int | HEV 0x42 climate energy this drive, raw (Wh inferred) |
 | `trip_ldc_raw` | int | HEV 0x49 12 V / electronics energy this drive, raw |
@@ -77,15 +74,19 @@ After the header: one CSV row of column names, then one row per sample. Units ar
 | `trip_mot2_raw` | int | HEV 0x48 rear motor drive energy this drive, raw |
 | `trip_gen1_raw` | int | HEV 0x59 front motor regen energy this drive, raw |
 | `trip_gen2_raw` | int | HEV 0x5a rear motor regen energy this drive, raw |
+| `hvac_raw` | number | HEV 0x4f live climate power, raw (~20 W/unit, inferred) |
 | `charge_state_raw` | int | HEV 0x07 charge state, raw (3 = not charging) |
+| `nav_active` | 0/1 | Android Auto navigation active |
+| `nav_rem_m`, `nav_rem_s` | number | navigation distance (m) and time (s) remaining |
+| `nav_charger` | 0/1 | the stop being tracked (the next stop) is a charging stop |
+| `nav_charger_kw` | number | that stop's charger power, kW |
+| `precond_state` | int | battery preconditioning state: `PrecondCore` 0 OFF … 8 ERROR ([PRECONDITIONING.md](PRECONDITIONING.md)) |
+| `pack_max_c` | number | highest battery module temperature, °C |
+| `batt_v`, `batt_a`, `batt_kw` | number | HV battery voltage, current, power |
+| `hvac_w` | number | climate power, W |
 | `charging` | 0/1 | charging |
 | `charge_kw` | number | charging power, kW |
 | `drive_mode_raw` | int | drive mode, raw |
-| `nav_active` | 0/1 | Android Auto navigation active |
-| `nav_rem_m`, `nav_rem_s` | number | navigation distance (m) and time (s) remaining |
-| `nav_charger` | 0/1 | destination is a charging station |
-| `nav_charger_kw` | number | destination charger power, kW |
-| `precond_state` | int | battery preconditioning state, raw |
 
 ## Never in a log
 

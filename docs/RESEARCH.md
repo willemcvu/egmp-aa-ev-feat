@@ -117,7 +117,7 @@ With the Java side making these choices, a mix of B and C is the clear path:
 - About 800 such lines were in today's captures.
 - Fields by name: `XEV_SOCDIS`, `XEV_MIN_BATT_TEMP`, `EV_AVLBL_ENRG`, `VCRM_SW_VER`, `DATC_OUT_TEMP_SNSR`, `VCU_BATT_COND_IND_STA`, `VCU_DTE_BASE`, `VCU_DTE_ADD`.
 - The first value matches `DISPLAY_SOC` (0x2f = 47).
-- **Byte layout and units not yet confirmed.** Pin them down from a capture where SOC changes (a short drive or charge).
+- **Byte layout and units not yet confirmed.** Pin them down from a capture where SOC changes (a short drive or charge). *(Since resolved: [DATA-SOURCES.md](DATA-SOURCES.md) §1.1 and §2.)*
 
 **Capacity without manual configuration.** `EV_AVLBL_ENRG` is the car's own usable-energy figure and should reflect pack degradation. As a cross-check, derive usable capacity from energy change ÷ SOC change during a drive or charge. Goal: no SOH setting; a manual capacity only as an emergency override.
 
@@ -188,9 +188,12 @@ Callers of `reportDiagnosticsData`:
 - Verify the patched library only differs at the intended bytes.
 - Neither file is boot-critical. The failure mode is AA not starting; uninstall restores Leafia's files.
 
-**Status:** built 2026-10-27 (see HANDOFF.md "Current state"): `tools/build_all.sh` produces the patched library, the GPM dex/APK and the NEMESIS package `dist/aa.ev.model.zip`; `tools/test_package.sh` verifies the install/uninstall logic in a host sandbox. Not yet tested on the car.
+**Status:** built 2026-10-27 (see HANDOFF.md "Current state"): `tools/build_all.sh` produces the patched library, the GPM dex/APK and the NEMESIS package `dist/aa.ev.model.zip`; `tools/test_package.sh` verifies the install/uninstall logic in a host sandbox. *(Since tested on the car: EV routing works over wired AA; v0.2.0 adds preconditioning, capacity learning and drive logging, see [ROADMAP.md](ROADMAP.md).)*
 
 ## 6. Next steps
+
+*(Historical, 2026-10-27. Items 2–4 are done; for what's next see [ROADMAP.md](ROADMAP.md).)*
+
 Done: ADB, Leafia, `adb.home`, wired AA baseline, live SOC/range reads.
 
 1. **Prototype publishing to Maps with no car risk**: phone ↔ aa-proxy-rs (MITM + EV) ↔ Google's Desktop Head Unit, all on the laptop. Proves the SDR changes, the sensor-23 handshake and our Ioniq 5 model blob against real Maps before any head-unit patch.
