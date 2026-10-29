@@ -27,7 +27,7 @@ import java.util.TimeZone;
  */
 final class EvLogger {
     private static final String TAG = "EvLogger";
-    static final String PKG = "aa.ev.model 0.2.0-dev";
+    static final String PKG = "aa.ev.model 0.2.0";
     private static final String DIR = "evlog";
     private static final long MAX_FILE_BYTES = 4L * 1024 * 1024;
     private static final long MAX_DIR_BYTES = 32L * 1024 * 1024;

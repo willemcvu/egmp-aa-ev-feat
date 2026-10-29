@@ -18,15 +18,15 @@ import java.util.List;
  *   Cancel   = HEV 65(2047), 66(1023), 62(0,0), sleep 130 ms (all attempted)
  *   Start only with setting enabled (HEV flag 94 == 2), READY (flag 44 == 1)
  *   and the BCM indicator (txn 109) Off; ownership journalled before the
- *   first command; a recovered journal only ever cancels; 5 min without
- *   Active after Start cancels; READY lost / setting disabled / Active->Off
- *   cancels.
+ *   first command; a recovered journal only ever cancels; READY lost /
+ *   setting disabled / Active->Off / status unreadable for 5 min cancels.
+ *   No "no Active after N min" cancel: the BMS times the heating itself.
  */
 public final class PrecondCore {
 
     /** Car access. Implementations must refuse anything outside the profile. */
     public interface Vehicle {
-        /** Device + firmware fingerprint + service descriptors verified. */
+        /** Framework fingerprint (odex SHA-256) + service descriptors verified. */
         boolean compatible();
 
         int readEnabled() throws Exception;    // HEV txn 3 flag 94: 2 = enabled

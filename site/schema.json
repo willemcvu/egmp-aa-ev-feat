@@ -38,7 +38,7 @@
       "key": "capacity_source",
       "type": "string",
       "pattern": "^[a-z_]{1,16}$",
-      "desc": "where the capacity came from: nominal, soh, bms (BMS available energy \u00f7 SOC), ..."
+      "desc": "where the capacity came from: nominal (new-car value) or bms (learned: BMS available energy \u00f7 SOC)"
     },
     {
       "key": "date",

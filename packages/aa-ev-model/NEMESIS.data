@@ -1,7 +1,7 @@
 [nemesis]
 version=1.0
 id=aa.ev.model
-name=AA EV energy model (Ioniq 5 prototype)
+name=AA EV routing, preconditioning and drive logs
 types=application,service
 preinstall=scripts/pre.sh
 postinstall=scripts/post.sh

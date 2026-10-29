@@ -28,8 +28,8 @@ failure can never break navigation):
   9. destroy(): Precond.stop() on entry (AA session teardown,
      GalConnectionSession.clearSession()).
 
-The preconditioning hooks are not gated by persist.gpm.ev.off: Precond has
-its own switch, persist.gpm.precond (default 0 = parse only, no commands).
+The preconditioning hooks are not gated by persist.gpm.ev.off. Precond has
+no switch: the car's own battery-conditioning EV setting is its off control.
 
 GalReceiver.smali (which Leafia already patches) is not touched.
 

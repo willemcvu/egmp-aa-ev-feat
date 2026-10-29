@@ -73,13 +73,13 @@ OUT_JAVA = (
     / "gpm-ev/src/com/google/android/projection/protocol/EvModelTemplate.java"
 )
 
-CAPACITY_WH = 77400  # 2022 Ioniq 5 LR (US); runtime may shrink via SOH
+CAPACITY_WH = 77400  # 2022 Ioniq 5 LR (US) reference pack; runtime sends the learned capacity
 RESERVE_WH = 2400    # ~3% of capacity
 PLACEHOLDER_WH = 50000
 ENERGY_WIDTH = 5
-CAPACITY_WIDTH = 5   # runtime-patchable too (degradation via SOH probe)
+CAPACITY_WIDTH = 5   # runtime-patchable too (learned from BMS energy / SOC)
 AIR_DENSITY = 1.225  # kg/m^3 at 15 C sea level
-OUTSIDE_TEMP_C = 15.0  # static for now; live temp needs DATC listener (future)
+OUTSIDE_TEMP_C = 15.0  # placeholder; EvModelSender patches the live outside temp
 
 # Road load from reference/IONIQ5 roll-down test.xlsx (A, B, C).
 ROAD_LOAD = (196.0, 0.0, 0.493)
