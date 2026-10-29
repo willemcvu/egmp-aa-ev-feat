@@ -37,7 +37,6 @@ Runtime switches (via ADB, then replug Android Auto):
 | Property | Effect |
 |---|---|
 | `persist.gpm.ev.off=1` | stock behaviour without uninstalling |
-| `persist.gpm.ev.sohcap=1` | scale capacity by the BMS state of health (degraded packs) |
 
 ## Docs
 
@@ -48,6 +47,12 @@ Runtime switches (via ADB, then replug Android Auto):
 | [docs/PRECONDITIONING.md](docs/PRECONDITIONING.md) | research: triggering battery preconditioning from Maps routes |
 | [docs/HANDOFF.md](docs/HANDOFF.md) | developer handoff: build, first car test, open questions |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | planned additions: auto preconditioning, drive logging, real capacity |
+| [docs/LOGGING.md](docs/LOGGING.md) | drive log format v1, cleaning rules, `tools/evlog.py` |
+| [Drive log checker](https://willemcvu.github.io/egmp-aa-ev-feat/) | check, clean and submit drive logs in your browser (`site/`) |
+
+## Contributing drive logs
+
+Logs from more cars, climates and battery ages are what the energy model needs most. The head unit will write one small CSV per Android Auto session (battery level, temperatures, model values; no location, no full VIN, no times of day) and copy them to an `egmp-aa-ev-logs` folder on a USB drive. Check and clean them on the [drive log checker](https://willemcvu.github.io/egmp-aa-ev-feat/), which runs in your browser, then submit them as a (public) GitHub issue from there. Format and command-line tool: [docs/LOGGING.md](docs/LOGGING.md). The on-car logger isn't released yet.
 
 ## Repository layout
 
@@ -58,6 +63,7 @@ Runtime switches (via ADB, then replug Android Auto):
 | `packages/aa-ev-model/` | the NEMESIS package (install/uninstall scripts) |
 | `packages/adb-home/` | dev helper: ADB over your home Wi-Fi only (set your router's MAC first) |
 | `reference/` | recovered model schema and protobuf decoders |
+| `site/` | drive log checker (GitHub Pages) and the log allowlist `schema.json` |
 | `release/` | USB-drive descriptor and README for releases |
 | `third_party/lpatch/` | Leafia's `lpatch` and delta tool (GPL-3.0) |
 

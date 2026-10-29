@@ -1,0 +1,105 @@
+:root {
+  --bg: #fbfbf9;
+  --fg: #1d2125;
+  --muted: #5b636b;
+  --line: #dcdfe2;
+  --card: #ffffff;
+  --accent: #0b6b74;
+  --accent-fg: #ffffff;
+  --ok: #1d7a3a;
+  --err: #b3261e;
+  --warn-bg: #fff6e0;
+  --warn-line: #e8c46a;
+  --code-bg: #eef0f1;
+  --drop-bg: #f1f6f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15181b;
+    --fg: #e4e7ea;
+    --muted: #9aa3ab;
+    --line: #2f353b;
+    --card: #1c2024;
+    --accent: #4fc3cc;
+    --accent-fg: #0b1d1f;
+    --ok: #6fd28d;
+    --err: #ff8a80;
+    --warn-bg: #2b2414;
+    --warn-line: #7a6326;
+    --code-bg: #262b30;
+    --drop-bg: #1a2427;
+  }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+.wrap { max-width: 46rem; margin: 0 auto; padding: 0 16px; }
+a { color: var(--accent); }
+code { font: 0.9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1em 0.3em; border-radius: 4px; overflow-wrap: anywhere; }
+
+header { border-bottom: 1px solid var(--line); padding: 2rem 0 1.5rem; }
+.kicker { margin: 0; font-size: 0.9rem; }
+.kicker a { color: var(--muted); text-decoration: none; }
+h1 { margin: 0.2rem 0 0.4rem; font-size: 2rem; line-height: 1.2; }
+.lede { margin: 0; color: var(--muted); font-size: 1.1rem; }
+h2 { font-size: 1.35rem; margin: 2.2rem 0 0.6rem; }
+h3 { font-size: 1.05rem; margin: 1.2rem 0 0.4rem; }
+.note { color: var(--muted); font-size: 0.95rem; }
+
+details { border: 1px solid var(--line); border-radius: 8px; background: var(--card); margin: 0.6rem 0; }
+details > summary { cursor: pointer; padding: 0.6rem 0.8rem; font-weight: 600; }
+.fields { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
+.fields th, .fields td { text-align: left; padding: 0.4rem 0.8rem; border-top: 1px solid var(--line); vertical-align: top; }
+.fields th { color: var(--muted); font-weight: 600; }
+.fields td:first-child { white-space: nowrap; }
+.never li::marker { content: "✕  "; color: var(--err); }
+.steps li { margin: 0.3rem 0; }
+
+.drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.2rem;
+  min-height: 9rem; padding: 1.5rem 1rem; text-align: center; cursor: pointer;
+  border: 2px dashed var(--line); border-radius: 12px; background: var(--drop-bg);
+}
+.drop:hover, .drop.over, .drop:focus-within { border-color: var(--accent); }
+.drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.drop-main { font-size: 1.1rem; font-weight: 600; }
+.drop-sub { color: var(--muted); }
+
+.status { min-height: 1.5em; font-weight: 600; }
+.status.err, .err { color: var(--err); }
+.ok { color: var(--ok); }
+
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 0.4rem 1rem 0.8rem; margin: 0.8rem 0; }
+.card.bad { border-color: var(--err); }
+.card h3 { margin: 0.5rem 0; overflow-wrap: anywhere; font-size: 1rem; }
+.summary { display: grid; grid-template-columns: max-content 1fr; gap: 0.15rem 1rem; margin: 0.4rem 0; font-size: 0.95rem; }
+.summary dt { color: var(--muted); }
+.summary dd { margin: 0; overflow-wrap: anywhere; }
+.removed { margin: 0.6rem 0; }
+.removed ul { margin: 0 0 0.6rem; padding-right: 0.8rem; font-size: 0.93rem; }
+.card-foot { margin-top: 0.6rem; }
+
+button, .button {
+  display: inline-block; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none;
+  padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid var(--accent);
+  background: transparent; color: var(--accent); max-width: 100%; overflow-wrap: anywhere;
+}
+.button.primary { background: var(--accent); color: var(--accent-fg); }
+button:focus-visible, .button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-top: 1rem; }
+.actions[hidden] { display: none; }
+.warn { flex-basis: 100%; background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 8px; padding: 0.6rem 0.8rem; color: var(--fg); }
+
+footer { border-top: 1px solid var(--line); margin-top: 3rem; padding-top: 1rem; padding-bottom: 2rem; font-size: 0.9rem; color: var(--muted); }
+
+@media (max-width: 30rem) {
+  h1 { font-size: 1.6rem; }
+  .fields td:first-child { white-space: normal; }
+  .actions > button, .actions > .button { width: 100%; text-align: center; }
+}

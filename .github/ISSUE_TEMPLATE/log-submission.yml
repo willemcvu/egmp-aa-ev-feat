@@ -1,0 +1,68 @@
+name: Drive log submission
+description: Contribute cleaned drive logs to improve the EV energy model.
+title: "Drive logs: "
+labels: ["drive-log"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! Check and clean your logs first on the [checker page](https://willemcvu.github.io/egmp-aa-ev-feat/) (runs in your browser, nothing is uploaded) or with `python3 tools/evlog.py clean IN OUT`.
+
+        **This issue and its attachments are public.** Attach only cleaned `egmp-*.csv` files, and don't write anything here you wouldn't post publicly (no full VIN, no places).
+  - type: dropdown
+    id: car
+    attributes:
+      label: Car model
+      options:
+        - Ioniq 5
+        - Ioniq 6
+        - EV6
+        - EV9
+        - GV60
+        - other
+    validations:
+      required: true
+  - type: input
+    id: model_year
+    attributes:
+      label: Model year
+      placeholder: "2022"
+    validations:
+      required: true
+  - type: input
+    id: product
+    attributes:
+      label: Head unit software
+      description: The `product` line of the log header (the checker shows it), e.g. `NEEV.USA.0000.V015.012.260507`.
+    validations:
+      required: true
+  - type: textarea
+    id: sessions
+    attributes:
+      label: Sessions
+      description: Filled in by the checker page, one line per file. Fine to leave as is.
+  - type: textarea
+    id: battery
+    attributes:
+      label: Battery note (optional)
+      description: Anything known about the battery, e.g. mileage, state of health from a scan tool, a pack replacement.
+  - type: textarea
+    id: conditions
+    attributes:
+      label: Conditions (optional)
+      description: Roughly what the drives were like (highway, city, towing, roof box, winter tyres, cabin heat). No places or addresses.
+  - type: textarea
+    id: files
+    attributes:
+      label: Log files
+      description: Drag the cleaned `.csv` files into this box, or click the attach bar under it. Zip them first if there are many.
+      placeholder: Drop the cleaned egmp-*.csv files here.
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: The attached files are cleaned logs from the checker page or `tools/evlog.py clean`, and I'm fine with them being public.
+          required: true

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>E-GMP drive logs</title>
+<meta name="description" content="Check, clean and contribute Android Auto EV drive logs from Hyundai/Kia/Genesis E-GMP cars to improve the egmp-aa-ev-feat energy model.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <p class="kicker"><a href="https://github.com/willemcvu/egmp-aa-ev-feat">egmp-aa-ev-feat</a></p>
+    <h1>Contribute drive logs</h1>
+    <p class="lede">Help Google Maps predict range better on Ioniq 5, Ioniq 6, EV6, EV9 and GV60 head units.</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <section>
+    <h2>What these logs are</h2>
+    <p>With <a href="https://github.com/willemcvu/egmp-aa-ev-feat">egmp-aa-ev-feat</a> installed, the head unit sends Google Maps an energy model of the car: how much energy it uses at a given speed and temperature, and how fast it charges. That model is fitted from only a few data points, mostly from one Ioniq 5. A log records, every few seconds while Android Auto is connected, the battery level, temperatures and the model values the car sent, so we can compare what Maps predicted with what the car really used, and fit the model for more cars, climates and battery ages.</p>
+  </section>
+
+  <section>
+    <h2>What is recorded</h2>
+    <p>One CSV file per Android Auto session. Only the fields below exist in the format; this page and <code>tools/evlog.py</code> remove anything else before you share a file.</p>
+    <details>
+      <summary>Session details (<span id="n-header">…</span> fields)</summary>
+      <table class="fields" id="tbl-header"><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody></tbody></table>
+    </details>
+    <details>
+      <summary>Measurements every few seconds (<span id="n-columns">…</span> columns)</summary>
+      <table class="fields" id="tbl-columns"><thead><tr><th>Column</th><th>Meaning</th></tr></thead><tbody></tbody></table>
+    </details>
+    <h3>Never recorded</h3>
+    <ul id="never" class="never"></ul>
+    <p class="note">The car is identified only by its head unit software version and the first part of the VIN (characters 1–8 and 10: maker, model, body, motor and model year), which is the same for every car of that model and year.</p>
+  </section>
+
+  <section>
+    <h2>How to collect logs</h2>
+    <ol class="steps">
+      <li>On a FAT32 or exFAT USB drive, create an empty folder named <code>egmp-aa-ev-logs</code>.</li>
+      <li>Plug the drive into the car's USB data port (the one Android Auto uses) with the car on.</li>
+      <li>The head unit copies new logs into that folder by itself. Leave the drive in for a minute, then take it out.</li>
+    </ol>
+    <p class="note">The logging part on the car is being built and isn't in a release yet. Cold drives, highway trips and fast-charging sessions are the most useful.</p>
+  </section>
+
+  <section id="tool">
+    <h2>Check and clean your logs</h2>
+    <p>Files are read in your browser. Nothing is uploaded until you choose to attach them to a GitHub issue yourself.</p>
+    <label class="drop" id="drop" for="pick">
+      <input type="file" id="pick" accept=".csv,text/csv" multiple>
+      <span class="drop-main">Drop <code>.csv</code> logs here</span>
+      <span class="drop-sub">or tap to choose files</span>
+    </label>
+    <p class="note">No logs yet? Try the <a href="sample.csv" id="try-sample">sample log</a>.</p>
+    <p id="status" role="status" class="status"></p>
+    <div id="results"></div>
+    <div id="actions" class="actions" hidden>
+      <button type="button" id="dl-all">Download cleaned logs</button>
+      <a class="button primary" id="submit" target="_blank" rel="noopener">Submit on GitHub</a>
+      <p class="note warn"><strong>Submitting creates a public GitHub issue.</strong> The issue form opens with your car, dates and durations filled in. Download the cleaned files first, then drag them into the issue's <em>Log files</em> box. Anyone can see and download attached files.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <p>Format: <a href="https://github.com/willemcvu/egmp-aa-ev-feat/blob/main/docs/LOGGING.md">docs/LOGGING.md</a> · Allowlist: <a href="schema.json">schema.json</a> · Command-line tool: <a href="https://github.com/willemcvu/egmp-aa-ev-feat/blob/main/tools/evlog.py">tools/evlog.py</a>. Not affiliated with Hyundai, Kia, Genesis or Google.</p>
+</footer>
+
+<script src="evlog.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
