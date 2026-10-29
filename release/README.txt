@@ -20,7 +20,8 @@ before changing anything and keeps a backup for uninstall, but you use it at
 your own risk.
 
 REQUIREMENTS (the installer refuses anything else and changes nothing)
-- Hyundai Ioniq 5 (US), Gen5W head unit, software NEEV.USA.0000.V015.012.260507
+- Hyundai Ioniq 5 (US), Gen5W head unit, software NEEV.USA.0000.V015.012.260507,
+  or Kia EV6 (US), software CVEV.USA.0000.V015.012.260507
 - NEMESIS installed (https://github.com/xwtk/hmg_nemesis)
 - HMG Leafia Plus v1.0.5 installed (https://github.com/VysseCodes/HMG-Leafia-Plus)
 

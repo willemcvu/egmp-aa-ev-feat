@@ -11,9 +11,20 @@ if [ ! -x /system/xbin/nemesis ]; then
     exit 1
 fi
 
-for _f in MD5SUMS lpatch HKMC_GPM.apk.lpd libautoreceiver_infobank.so.lpd; do
-    if [ ! -s "$FILES/$_f" ]; then
-        log "FAIL: $FILES/$_f missing"
+if [ -z "$CAR_NAME" ]; then
+    log "FAIL: unsupported car (ro.build.product=$(getprop ro.build.product 2>/dev/null)) - refusing"
+    toast "AA EV model not installed: this car isn't supported (Ioniq 5 or EV6, US). Nothing was changed."
+    exit 1
+fi
+log "car: $CAR_NAME"
+if [ ! -s "$FILES/lpatch" ]; then
+    log "FAIL: $FILES/lpatch missing"
+    exit 1
+fi
+for _f in MD5SUMS HKMC_GPM.apk.lpd libautoreceiver_infobank.so.lpd; do
+    if [ ! -s "$FILES_CAR/$_f" ]; then
+        log "FAIL: $FILES_CAR/$_f missing (this build has no files for the $CAR_NAME)"
+        toast "AA EV model not installed: this build has no files for the $CAR_NAME. Nothing was changed."
         exit 1
     fi
 done
@@ -45,7 +56,7 @@ elif [ "$_live_lib" = "$SUM_PAY_LIB" ] && [ "$_live_apk" != "$SUM_BASE_APK" ]; t
     fi
 else
     log "FAIL: live files are neither Leafia v1.0.5 nor this package's - refusing"
-    toast "AA EV model not installed: needs HMG Leafia Plus v1.0.5 on Ioniq 5 (US) 260507 firmware. Nothing was changed."
+    toast "AA EV model not installed: needs HMG Leafia Plus v1.0.5 on $CAR_NAME 260507 firmware. Nothing was changed."
     exit 1
 fi
 

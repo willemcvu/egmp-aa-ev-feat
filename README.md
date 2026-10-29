@@ -1,13 +1,13 @@
 # egmp-aa-ev-feat
 
-Real EV routing in Google Maps on Android Auto for the Hyundai Ioniq 5's Gen5W head unit: battery % on arrival, charging stops, realistic charge times, and automatic battery preconditioning on the way to a fast charger. Built on [NEMESIS](https://github.com/xwtk/hmg_nemesis) and [HMG Leafia Plus](https://github.com/VysseCodes/HMG-Leafia-Plus).
+Real EV routing in Google Maps on Android Auto for the Gen5W head unit in the Hyundai Ioniq 5 and Kia EV6: battery % on arrival, charging stops, realistic charge times, and automatic battery preconditioning on the way to a fast charger. Built on [NEMESIS](https://github.com/xwtk/hmg_nemesis) and [HMG Leafia Plus](https://github.com/VysseCodes/HMG-Leafia-Plus).
 
 > [!WARNING]
 > This modifies your infotainment system's files. The installer checks every file first and keeps a byte-for-byte backup, but you use it at your own risk. Not affiliated with Hyundai, Kia or Google.
 
 ## Requirements
 
-- Hyundai Ioniq 5 (US), Gen5W software `NEEV.USA.0000.V015.012.260507`
+- Hyundai Ioniq 5 (US), Gen5W software `NEEV.USA.0000.V015.012.260507`, or Kia EV6 (US), `CVEV.USA.0000.V015.012.260507`
 - [NEMESIS](https://github.com/xwtk/hmg_nemesis) installed
 - **[HMG Leafia Plus](https://github.com/VysseCodes/HMG-Leafia-Plus) v1.0.5 installed first.** This package builds on Leafia's modified Android Auto files; without exactly v1.0.5 the installer refuses and changes nothing.
 
