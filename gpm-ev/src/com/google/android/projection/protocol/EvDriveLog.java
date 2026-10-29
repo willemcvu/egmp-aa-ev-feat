@@ -43,7 +43,7 @@ import java.util.TimeZone;
  */
 public final class EvDriveLog {
     private static final String TAG = "EvDriveLog";
-    static final String PKG = "aa.ev.model 0.2.1-dev";
+    static final String PKG = "aa.ev.model 0.2.1";
     static final String MAGIC = "# egmp-aa-ev-log v2";
 
     static final long SAMPLE_MS = 1000;

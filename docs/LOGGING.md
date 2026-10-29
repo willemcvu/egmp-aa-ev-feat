@@ -27,7 +27,7 @@ v2 is a superset of v1: same header keys plus `sample_s`, same columns plus the 
 # product=NEEV.USA.0000.V015.012.260507
 # device=wp_daudioplus_neev_us
 # vin_model=KM8KRDAFN
-# pkg=aa.ev.model 0.2.1-dev
+# pkg=aa.ev.model 0.2.1
 # model_capacity_wh=77400
 # capacity_source=bms
 # date=2026-01-17
@@ -49,7 +49,7 @@ Lines starting with `# `, each `# key=value`. The first line is exactly `# egmp-
 | `product` | head unit software version | `NEEV.USA.0000.V015.012.260507` |
 | `device` | head unit device name | `wp_daudioplus_neev_us` |
 | `vin_model` | VIN characters 1–8 plus character 10 (maker, model, body, motor, model year). **Never the full VIN**: no check digit (9), plant (11) or serial number (12–17) | `KM8KRDAFN` |
-| `pkg` | logging package and version | `aa.ev.model 0.2.1-dev` |
+| `pkg` | logging package and version | `aa.ev.model 0.2.1` |
 | `model_capacity_wh` | nominal capacity of the model template, Wh | `77400` |
 | `capacity_source` | where `capacity_wh` comes from: `nominal` (new-car value, nothing learned yet) or `bms` (learned from BMS available energy ÷ SOC). Readers should accept other short lower-case values | `bms` |
 | `date` | UTC date the file started, `YYYY-MM-DD`. No time of day. Left out if the clock wasn't set | `2026-01-17` |
