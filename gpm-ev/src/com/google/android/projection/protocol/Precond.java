@@ -329,9 +329,13 @@ public final class Precond {
         private static final int FLAG_BATT_COND = 94;
         private static final int TX_BCM_COND_INDICATOR = 109;
 
-        // gen5w-preconditioning PreconditioningProfile (Ioniq 5 US 260507);
-        // matches our private/car-neev-260507 framework.
-        static final String DEVICE = "wp_daudioplus_neev23_us";
+        // gen5w-preconditioning PreconditioningProfile (Ioniq 5 US 260507).
+        // Its device name is the 2023 unit's; the owner's 2022 reports
+        // wp_daudioplus_neev_us with byte-identical framework odex files
+        // (same SHA-256 below, so the same binder interface): accept both.
+        static final String[] DEVICES = {
+            "wp_daudioplus_neev_us", "wp_daudioplus_neev23_us",
+        };
         static final String FRAMEWORK_SHA256 =
                 "dd72e04bce0a2b4bda1506308ac21f91002c1436553b8156c345cc4313661338";
         static final String SERVICE_SHA256 =
@@ -346,7 +350,7 @@ public final class Precond {
             }
             boolean ok;
             try {
-                ok = Build.VERSION.SDK_INT == 19 && DEVICE.equals(Build.DEVICE)
+                ok = Build.VERSION.SDK_INT == 19 && knownDevice(Build.DEVICE)
                         && FRAMEWORK_SHA256.equals(
                                 sha256("/system/framework/automotive.odex"))
                         && SERVICE_SHA256.equals(
@@ -450,6 +454,15 @@ public final class Precond {
                 data.recycle();
                 reply.recycle();
             }
+        }
+
+        static boolean knownDevice(String d) {
+            for (String x : DEVICES) {
+                if (x.equals(d)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static String sha256(String path) throws Exception {
