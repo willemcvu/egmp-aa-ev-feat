@@ -23,9 +23,21 @@ docs/ENERGY-MODEL.md:
             Tesla Supercharger (500 V, boost-limited flat 105 kW to 90%)
   omitted   1.5, 1.8-1.12, 6, 9, 10 (the Ford sample works without them)
 
+Capacity scaling: blocks 4.1 and 8.1 are defined for the 77.4 kWh reference
+pack, but charging limits follow SOC (BMS taper by cell voltage), not absolute
+energy. The head unit sends the LEARNED usable capacity in 1.4 (~62.9 kWh on
+the owner's car), so it rescales every energy axis (4.1 energy_wh, 8.1
+energy_wh) and every 8.1 seconds value by k = capacity / 77400 at runtime:
+same power at the same SOC, k x the energy per segment. The thermal pause is
+a fixed cooling stop and is not scaled. Without this, "100%" (62.9 kWh) lands
+at ~81% of the reference curve, before the taper, and Maps predicted 28->100%
+in 16 min on a 180 kW charger.
+
 Flow: generate protobuf text -> protoc --encode -> widen the current-energy
-varint to 5 bytes (length prefixes fixed up) -> wrap as the AA message
-[0x80 0x03][BA 01 len][model] -> emit EvModelTemplate.java.
+and capacity varints to 5 bytes, and every 4.1/8.1 energy axis and 8.1 seconds
+varint to SCALE_WIDTH bytes (length prefixes rebuilt) -> wrap as the AA
+message [0x80 0x03][BA 01 len][model] -> emit EvModelTemplate.java with the
+patch offsets and reference values.
 
 Outputs:
   dist/ioniq5_model.txt    generated protobuf text (review/diff aid)
@@ -43,6 +55,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from protoutil import (  # noqa: E402
     fixed_varint,
+    iter_fields,
     parse_fields,
     read_varint,
     write_varint,
@@ -168,6 +181,13 @@ CT_STEP_WH = 3870  # 5% of capacity
 # tools/analyze_charge_history.py); eta = 1.0 biases the model ~1.8 min fast.
 CHARGE_ETA = 0.95  # fitted on two deep warm sessions (0.955, 0.944)
 
+# Runtime-scaled varints (4.1 energy_wh, 8.1 energy_wh and seconds) are
+# widened to this many bytes: 21 bits, room for 2 097 151. The largest
+# reference value is the 1.44 kW row's ~204 000 s; capacity is capped at
+# 90 kWh on the car (k <= 1.17), so scaled values always fit.
+SCALE_WIDTH = 3
+SCALE_MAX_CAPACITY_WH = 90000  # EvModelSender.CAP_MAX_WH
+
 
 def interp_curve(energy_wh: float) -> float:
     """Max charge power at a given energy, linear on CHARGE_CURVE."""
@@ -191,30 +211,32 @@ def charger_power(charger_w: int, energy_wh: float) -> float:
     return min(charger_w, interp_curve(energy_wh))
 
 
+def pause_seconds(charger_w: int, energy_wh: int) -> int:
+    """Thermal pause time included in the table point at energy_wh: fast 800 V
+    chargers (>= PAUSE_MIN_CHARGER_W, not the Supercharger row) from the
+    first step at or past PAUSE_AT_WH on."""
+    if (
+        charger_w >= PAUSE_MIN_CHARGER_W
+        and charger_w != SUPERCHARGER_W
+        and energy_wh >= PAUSE_AT_WH
+    ):
+        return PAUSE_SECONDS
+    return 0
+
+
 def charge_table(charger_w: int) -> list[tuple[int, int]]:
     """Cumulative seconds to reach each energy step on this charger.
 
-    Fast 800 V chargers (>= PAUSE_MIN_CHARGER_W, not the Supercharger row)
-    get the thermal pause inserted as a flat +PAUSE_SECONDS when cumulative
-    energy crosses PAUSE_AT_WH.
+    Includes the thermal pause (pause_seconds) as a flat time insertion.
     """
     out = [(0, 0)]
     seconds = 0.0
-    paused = False
     e = CT_STEP_WH
     while e <= CAPACITY_WH:
         # segment midpoint power, charger-side; scale to battery-side energy
         p = charger_power(charger_w, e - CT_STEP_WH / 2) * CHARGE_ETA
         seconds += 3600.0 * CT_STEP_WH / p
-        if (
-            not paused
-            and charger_w >= PAUSE_MIN_CHARGER_W
-            and charger_w != SUPERCHARGER_W
-            and e >= PAUSE_AT_WH
-        ):
-            seconds += PAUSE_SECONDS
-            paused = True
-        out.append((e, round(seconds)))
+        out.append((e, round(seconds) + pause_seconds(charger_w, e)))
         e += CT_STEP_WH
     return out
 
@@ -304,7 +326,103 @@ def widen_runtime_fields(model: bytearray) -> tuple[int, int]:
     return energy_off, cap_off
 
 
-def verify(model: bytes) -> None:
+# Message fields to descend into, and the varints to widen, by field path.
+_SCALE_MSGS = {(4,), (4, 1), (8,), (8, 1), (8, 1, 2)}
+_SCALE_VARINTS = {
+    (4, 1, 1): "axis",      # charge_limits.max_charge_power.energy_wh
+    (8, 1, 2, 1): "axis",   # charge_time.by_charger_power.points.energy_wh
+    (8, 1, 2, 2): "time",   # charge_time.by_charger_power.points.seconds
+}
+
+
+def _widen_scaled(buf, start: int, end: int, path: tuple, marks: list) -> bytearray:
+    """Re-encode buf[start:end] with the _SCALE_VARINTS widened to SCALE_WIDTH.
+
+    Length prefixes of every enclosing message are rebuilt. Appends
+    (kind, offset in the returned bytes, value) to marks in wire order.
+    """
+    out = bytearray()
+    for num, f in iter_fields(buf, start, end):
+        p = path + (num,)
+        if f.wire == 2 and p in _SCALE_MSGS:
+            sub_marks: list = []
+            sub = _widen_scaled(buf, f.val_off, f.val_off + f.val_len, p, sub_marks)
+            out += write_varint(num << 3 | 2) + write_varint(len(sub))
+            base = len(out)
+            out += sub
+            marks.extend((k, base + o, v) for k, o, v in sub_marks)
+        elif f.wire == 0 and p in _SCALE_VARINTS:
+            v, _ = read_varint(buf, f.val_off)
+            out += write_varint(num << 3)
+            marks.append((_SCALE_VARINTS[p], len(out), v))
+            out += fixed_varint(v, SCALE_WIDTH)
+        else:
+            out += buf[f.tag_off : f.val_off + f.val_len]
+    return out
+
+
+def widen_scaled_fields(model: bytearray) -> tuple[bytearray, list, list]:
+    """Widen the capacity-scaled varints of blocks 4.1 and 8.1.
+
+    Returns (new model, axis marks, time marks), each mark (offset in the new
+    model, reference value). Blocks 4 and 8 follow battery (1) and road load
+    (2), so the patch points there keep their offsets. Checks the marks
+    against CHARGE_CURVE / charge_table() so every point is accounted for.
+    """
+    marks: list = []
+    new = _widen_scaled(model, 0, len(model), (), marks)
+    axis = [(o, v) for k, o, v in marks if k == "axis"]
+    times = [(o, v) for k, o, v in marks if k == "time"]
+    want_axis = [e for e, _ in CHARGE_CURVE]
+    want_time = []
+    for c in CHARGERS_W:
+        for e, s in charge_table(c):
+            want_axis.append(e)
+            want_time.append(s)
+    assert [v for _, v in axis] == want_axis, "4.1/8.1 energy axis mismatch"
+    assert [v for _, v in times] == want_time, "8.1 seconds mismatch"
+    top_old = parse_fields(model, 0, len(model))
+    top_new = parse_fields(new, 0, len(new))
+    for num in (1, 2):
+        assert top_old[num].tag_off == top_new[num].tag_off
+        assert top_old[num].val_len == top_new[num].val_len
+    limit = 1 << (7 * SCALE_WIDTH)
+    kmax = SCALE_MAX_CAPACITY_WH / CAPACITY_WH
+    assert max(want_axis + want_time) * kmax < limit, "SCALE_WIDTH too small"
+    return new, axis, times
+
+
+def time_fixed_seconds() -> list[int]:
+    """Per 8.1 point, the part of its seconds that is NOT capacity-scaled
+    (the thermal pause), in wire order."""
+    return [pause_seconds(c, e) for c in CHARGERS_W for e, _ in charge_table(c)]
+
+
+def protoc_decode(model: bytes) -> str:
+    r = subprocess.run(
+        ["protoc", "-I", str(PROTO.parent), "--decode=vem.VehicleEnergyModel", PROTO.name],
+        input=model,
+        capture_output=True,
+    )
+    assert r.returncode == 0, r.stderr.decode()
+    return r.stdout.decode()
+
+
+def java_ints(name: str, vals: list[int], comment: str) -> str:
+    """A static final int[] declaration, wrapped at ~100 columns."""
+    lines, cur = [], ""
+    for v in vals:
+        item = f"{v}, "
+        if len(cur) + len(item) > 88:
+            lines.append(cur.rstrip())
+            cur = ""
+        cur += item
+    lines.append(cur.rstrip().rstrip(","))
+    body = "\n".join("        " + ln for ln in lines)
+    return f"    // {comment}\n    static final int[] {name} = {{\n{body}\n    }};\n"
+
+
+def verify(model: bytes, canonical: bytes) -> None:
     top = parse_fields(model, 0, len(model))
     batt = top[1]
     bf = parse_fields(model, batt.val_off, batt.val_off + batt.val_len)
@@ -313,14 +431,10 @@ def verify(model: bytes) -> None:
         q = parse_fields(model, bf[num].val_off, bf[num].val_off + bf[num].val_len)[1]
         vals[num] = read_varint(model, q.val_off)[0]
     assert vals == {2: RESERVE_WH, 3: PLACEHOLDER_WH, 4: CAPACITY_WH}, vals
-    # protoc must accept the result and see the same values
-    r = subprocess.run(
-        ["protoc", "-I", str(PROTO.parent), "--decode=vem.VehicleEnergyModel", PROTO.name],
-        input=model,
-        capture_output=True,
-    )
-    assert r.returncode == 0, r.stderr.decode()
-    txt = r.stdout.decode()
+    # protoc must accept the widened result and see exactly the values of the
+    # canonical encoding (i.e. unchanged at k = 1)
+    txt = protoc_decode(model)
+    assert txt == protoc_decode(canonical), "widened model decodes differently"
     for want in (f"value: {RESERVE_WH}", f"value: {PLACEHOLDER_WH}",
                  f"value: {CAPACITY_WH}", "value: 196", "value: 0.493"):
         assert want in txt, want
@@ -339,10 +453,13 @@ def main() -> int:
     if r.returncode != 0:
         print(r.stderr.decode())
         return 1
-    model = bytearray(r.stdout)
+    canonical = bytes(r.stdout)
+    model = bytearray(canonical)
 
     energy_off, cap_off = widen_runtime_fields(model)
-    verify(bytes(model))
+    size_battery_only = len(model)
+    model, axis_marks, time_marks = widen_scaled_fields(model)
+    verify(bytes(model), canonical)
     # battery.outside_temp_c (field 7, wire type 5) - float bits patch point
     top = parse_fields(model, 0, len(model))
     batt = top[1]
@@ -368,8 +485,24 @@ def main() -> int:
     cap_off += hdr
     temp_off = temp_off_in_model + hdr
     a_off = a_off_in_model + hdr
-    print(f"model {len(model)} bytes, batch {len(batch)} bytes; offsets: "
-          f"energy@{energy_off} capacity@{cap_off} temp@{temp_off} roadA@{a_off}")
+    print(f"model {len(model)} bytes, batch {len(batch)} bytes "
+          f"(model {size_battery_only} before widening the 4.1/8.1 varints); "
+          f"offsets: energy@{energy_off} capacity@{cap_off} temp@{temp_off} "
+          f"roadA@{a_off}; {len(axis_marks)} energy-axis + {len(time_marks)} "
+          f"seconds varints scaled at runtime")
+    scale_java = (
+        java_ints("AXIS_OFFSETS", [o + hdr for o, _ in axis_marks],
+                  "4.1 + 8.1 energy_wh varints (SCALE_WIDTH bytes), x k")
+        + java_ints("AXIS_WH", [v for _, v in axis_marks],
+                    "their values for the reference pack (CAPACITY_WH)")
+        + java_ints("TIME_OFFSETS", [o + hdr for o, _ in time_marks],
+                    "8.1 seconds varints (SCALE_WIDTH bytes)")
+        + java_ints("TIME_S", [v for _, v in time_marks],
+                    "their values for the reference pack")
+        + java_ints("TIME_FIXED_S", time_fixed_seconds(),
+                    "part of TIME_S not scaled (thermal pause): "
+                    "(TIME_S - fixed) x k + fixed")
+    )
     model_rev = hashlib.sha1(batch).hexdigest()[:8]
     cold_t = ", ".join(f"{t}f" for t, _ in COLD_DELTA_A)
     cold_a = ", ".join(f"{a}f" for _, a in COLD_DELTA_A)
@@ -400,6 +533,11 @@ def main() -> int:
         "    // extra road load A vs outside temp (C), linear between, clamped\n"
         "    static final float[] COLD_TEMPS_C = {%s};\n"
         "    static final float[] COLD_DELTA_A_N = {%s};\n"
+        "    // Capacity scaling (EvModelSender.scaleTemplate): 4.1/8.1 are\n"
+        "    // defined for CAPACITY_WH; energy axes and charge seconds are\n"
+        "    // multiplied by k = capacity / CAPACITY_WH at runtime.\n"
+        "    static final int SCALE_WIDTH = %d;\n"
+        "%s"
         '    static final String TEMPLATE_B64 =\n'
         '        "%s"\n'
         "%s;\n\n"
@@ -407,7 +545,7 @@ def main() -> int:
         "}\n"
         % (CAPACITY_WH, cap_off, CAPACITY_WIDTH, energy_off, ENERGY_WIDTH,
            PLACEHOLDER_WH, temp_off, model_rev, a_off, ROAD_LOAD[0], cold_t, cold_a,
-           lines[0], concat)
+           SCALE_WIDTH, scale_java, lines[0], concat)
     )
     print(f"wrote {OUT_TXT.relative_to(ROOT)}, {OUT_MODEL.relative_to(ROOT)}, "
           f"{OUT_BATCH.relative_to(ROOT)}, {OUT_JAVA.relative_to(ROOT)}")

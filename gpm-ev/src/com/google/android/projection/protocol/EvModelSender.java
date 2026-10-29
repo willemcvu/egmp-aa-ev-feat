@@ -28,7 +28,9 @@ import com.hkmc.cluster.NavigationClusterListener;
  *    XEV_MIN_BATT_TEMP / EV_AVLBL_ENRG / VCU_DTE_* are logged for later
  *    calibration (cold-pack charge caps, remaining-energy units)
  *  - EV_AVLBL_ENRG (BMS available energy, 2 Wh steps): current energy, and
- *    usable capacity learned as available energy / SOC (see learnCapacity)
+ *    usable capacity learned as available energy / SOC (see learnCapacity);
+ *    the charge curve and charge-time tables are rescaled to that capacity
+ *    so their taper stays at the same SOC (see scaleTemplate)
  *  - BMS SOH via tm_hscan_service txn 0xd6: logged only (a health index,
  *    not usable capacity)
  *
@@ -115,6 +117,8 @@ public final class EvModelSender {
     private static boolean sRunning;
     private static SensorSource sSource;
     private static byte[] sTemplate;
+    private static byte[] sScaled;          // sTemplate scaled for sScaledCapWh
+    private static int sScaledCapWh = -1;
     private static IBinder sHev;
     private static IBinder sHcan;
     private static int sLastGoodHalfPct = -1;
@@ -137,7 +141,7 @@ public final class EvModelSender {
             if (sTemplate == null) {
                 sTemplate = Base64.decode(EvModelTemplate.TEMPLATE_B64,
                         Base64.DEFAULT);
-                if (!checkPlaceholders()) {
+                if (!checkPlaceholders(sTemplate)) {
                     Log.e(TAG, "template placeholder mismatch, not starting");
                     sTemplate = null;
                     sSource = null;
@@ -222,7 +226,7 @@ public final class EvModelSender {
                     learnCapacity(halfPct, availWh);
                     int cap = capacityWh();
                     int wh = currentEnergyWh(halfPct, availWh, cap);
-                    byte[] msg = (byte[]) sTemplate.clone();
+                    byte[] msg = (byte[]) scaledTemplateLocked(cap).clone();
                     writeFixedVarint(msg, EvModelTemplate.CAPACITY_OFFSET, cap,
                             EvModelTemplate.CAPACITY_WIDTH);
                     writeFixedVarint(msg, EvModelTemplate.ENERGY_OFFSET, wh,
@@ -729,30 +733,115 @@ public final class EvModelSender {
         }
     }
 
-    private static boolean checkPlaceholders() {
-        byte[] want = new byte[EvModelTemplate.ENERGY_WIDTH];
-        writeFixedVarint(want, 0, EvModelTemplate.ENERGY_PLACEHOLDER_WH,
-                EvModelTemplate.ENERGY_WIDTH);
-        for (int i = 0; i < want.length; i++) {
-            if (sTemplate[EvModelTemplate.ENERGY_OFFSET + i] != want[i]) {
+    // ---- capacity scaling ------------------------------------------------------
+
+    /**
+     * The template with its charge curve (4.1) and charge-time tables (8.1)
+     * scaled for capWh, cached until the capacity changes. Caller holds LOCK.
+     * Falls back to the unscaled template if scaling fails, so a model is
+     * still sent.
+     */
+    private static byte[] scaledTemplateLocked(int capWh) {
+        if (sScaled == null || capWh != sScaledCapWh) {
+            try {
+                sScaled = scaleTemplate(sTemplate, capWh);
+                Log.i(TAG, "charge curve/tables scaled to " + capWh + " Wh");
+            } catch (Throwable t) {
+                logTickFailure(t);
+                sScaled = sTemplate;
+            }
+            sScaledCapWh = capWh;
+        }
+        return sScaled;
+    }
+
+    /**
+     * A copy of template with every 4.1/8.1 energy axis and 8.1 seconds value
+     * multiplied by k = capWh / CAPACITY_WH. Charging limits follow SOC (the
+     * BMS tapers by cell voltage), so a smaller usable pack reaches the same
+     * taper at the same SOC: same power, k x the energy per segment, k x the
+     * time. The thermal pause (TIME_FIXED_S) is a cooling stop and not
+     * scaled. Powers are untouched. Identity at k = 1.
+     */
+    static byte[] scaleTemplate(byte[] template, int capWh) {
+        byte[] out = (byte[]) template.clone();
+        long ref = EvModelTemplate.CAPACITY_WH;
+        if (capWh == ref) {
+            return out;
+        }
+        int width = EvModelTemplate.SCALE_WIDTH;
+        int max = (1 << (7 * width)) - 1;
+        int[] offs = EvModelTemplate.AXIS_OFFSETS;
+        int[] wh = EvModelTemplate.AXIS_WH;
+        for (int i = 0; i < offs.length; i++) {
+            long v = (wh[i] * (long) capWh + ref / 2) / ref;
+            writeFixedVarint(out, offs[i], (int) Math.min(v, max), width);
+        }
+        offs = EvModelTemplate.TIME_OFFSETS;
+        int[] s = EvModelTemplate.TIME_S;
+        int[] fixed = EvModelTemplate.TIME_FIXED_S;
+        for (int i = 0; i < offs.length; i++) {
+            long v = ((s[i] - fixed[i]) * (long) capWh + ref / 2) / ref + fixed[i];
+            writeFixedVarint(out, offs[i], (int) Math.min(v, max), width);
+        }
+        return out;
+    }
+
+    /** Fixed-width varint at off, or -1 if it isn't exactly width bytes. */
+    private static int readFixedVarint(byte[] buf, int off, int width) {
+        int v = 0;
+        for (int i = 0; i < width; i++) {
+            int b = buf[off + i] & 0xff;
+            if ((b & 0x80) == 0 ? i != width - 1 : i == width - 1) {
+                return -1;
+            }
+            v |= (b & 0x7f) << (7 * i);
+        }
+        return v;
+    }
+
+    /**
+     * The generated offsets match the template: placeholders, road A, and
+     * every scaled varint holding its reference value.
+     */
+    static boolean checkPlaceholders(byte[] template) {
+        try {
+            if (readFixedVarint(template, EvModelTemplate.ENERGY_OFFSET,
+                    EvModelTemplate.ENERGY_WIDTH) != EvModelTemplate.ENERGY_PLACEHOLDER_WH
+                    || readFixedVarint(template, EvModelTemplate.CAPACITY_OFFSET,
+                    EvModelTemplate.CAPACITY_WIDTH) != EvModelTemplate.CAPACITY_WH) {
                 return false;
             }
-        }
-        byte[] capWant = new byte[EvModelTemplate.CAPACITY_WIDTH];
-        writeFixedVarint(capWant, 0, EvModelTemplate.CAPACITY_WH,
-                EvModelTemplate.CAPACITY_WIDTH);
-        for (int i = 0; i < capWant.length; i++) {
-            if (sTemplate[EvModelTemplate.CAPACITY_OFFSET + i] != capWant[i]) {
+            byte[] aWant = new byte[4];
+            writeFloatLe(aWant, 0, EvModelTemplate.ROAD_A_N);
+            for (int i = 0; i < 4; i++) {
+                if (template[EvModelTemplate.ROAD_A_OFFSET + i] != aWant[i]) {
+                    return false;
+                }
+            }
+            int width = EvModelTemplate.SCALE_WIDTH;
+            int[] offs = EvModelTemplate.AXIS_OFFSETS;
+            if (offs.length != EvModelTemplate.AXIS_WH.length) {
                 return false;
             }
-        }
-        byte[] aWant = new byte[4];
-        writeFloatLe(aWant, 0, EvModelTemplate.ROAD_A_N);
-        for (int i = 0; i < 4; i++) {
-            if (sTemplate[EvModelTemplate.ROAD_A_OFFSET + i] != aWant[i]) {
+            for (int i = 0; i < offs.length; i++) {
+                if (readFixedVarint(template, offs[i], width) != EvModelTemplate.AXIS_WH[i]) {
+                    return false;
+                }
+            }
+            offs = EvModelTemplate.TIME_OFFSETS;
+            if (offs.length != EvModelTemplate.TIME_S.length
+                    || offs.length != EvModelTemplate.TIME_FIXED_S.length) {
                 return false;
             }
+            for (int i = 0; i < offs.length; i++) {
+                if (readFixedVarint(template, offs[i], width) != EvModelTemplate.TIME_S[i]) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Throwable t) {
+            return false;
         }
-        return true;
     }
 }

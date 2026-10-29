@@ -57,9 +57,8 @@ class Field:
         self.len_len = None
 
 
-def parse_fields(buf, start, end):
-    """Map field number -> Field for a message spanning buf[start:end]."""
-    fields = {}
+def iter_fields(buf, start, end):
+    """Yield (num, Field) for buf[start:end] in wire order, repeats included."""
     off = start
     while off < end:
         tag_off = off
@@ -83,5 +82,11 @@ def parse_fields(buf, start, end):
             f.len_len = off - f.len_off
             f.val_off, f.val_len = off, length
             off += length
-        fields[num] = f
-    return fields
+        yield num, f
+    assert off == end, "message overruns its length"
+
+
+def parse_fields(buf, start, end):
+    """Map field number -> Field for a message spanning buf[start:end]
+    (the last occurrence wins for repeated fields)."""
+    return dict(iter_fields(buf, start, end))

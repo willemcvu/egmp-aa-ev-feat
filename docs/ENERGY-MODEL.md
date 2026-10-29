@@ -70,10 +70,10 @@ Write it as protobuf text (`vem.VehicleEnergyModel`), then `protoc --encode=vem.
 | `1.6`, `1.7` | 1.225 static density; **outside temp is live** (nav battery packet `DATC_OUT_TEMP_SNSR` via `NavigationCluster.requestBatteryInfoReq()`, patched in place at runtime) |
 | `2.x` road load | **your rolldown data** (conversions below) |
 | `3.7` loss map | not in rolldown. Scale Ford's map, or build one from an efficiency estimate. Remember x is **sint32** |
-| `4.1` | E-GMP 800 V curve, calibrated on 233 real EA sessions: ~230–235 kW (3C) to 50%, thermal step-down to 160 kW at 53% held to 80%, 150 kW after the pause, then 60/35/22/15 kW at 90/95/98/100%. Thermal pause lives in the 8.1 tables, not here. (Cold-pack caps measured but not shipped — see "field findings") |
+| `4.1` | E-GMP 800 V curve, calibrated on 233 real EA sessions: ~230–235 kW (3C) to 50%, thermal step-down to 160 kW at 53% held to 80%, 150 kW after the pause, then 60/35/22/15 kW at 90/95/98/100%. Thermal pause lives in the 8.1 tables, not here. (Cold-pack caps measured but not shipped — see "field findings"). Energy axis defined for the 77.4 kWh reference pack and **rescaled at runtime to the learned capacity** (see "Capacity scaling") |
 | `5.4` | I²R: loss = R·(P/V)². Use the pack's DC resistance and ~650–700 V nominal. R is unmeasured; estimate it from the cell count and cell resistance, or from the voltage sag under load |
 | `7` aux power (Q4) | driving heater/A-C power vs outside temp; cold part calibrated with road load A (see "Cold weather") |
-| `8.1` | integrated from 4.1 (×η=0.95 charger→battery) + AC limits (10.9 kW onboard, 1.44 kW L1); 13 charger rows (350/260/250/240/200/175/150/125/100/50/25 kW DC, 10.9/1.44 kW AC); +300 s thermal pause at ~81% on ≥200 kW rows. **250 kW = Tesla Supercharger**: US Superchargers are all listed at exactly 250 kW and run at ~500 V, so the 800 V pack charges via the boost converter at a flat 105 kW to 90% (owner-measured, no step-down or pause), then the normal taper. Maps keys these tables by charger power only, so the voltage limit has to live in that row; 260/240 kW rows bracket it so other stations near 250 kW stay on the 800 V profile |
+| `8.1` | integrated from 4.1 (×η=0.95 charger→battery) + AC limits (10.9 kW onboard, 1.44 kW L1); 13 charger rows (350/260/250/240/200/175/150/125/100/50/25 kW DC, 10.9/1.44 kW AC); +300 s thermal pause at ~81% on ≥200 kW rows. **250 kW = Tesla Supercharger**: US Superchargers are all listed at exactly 250 kW and run at ~500 V, so the 800 V pack charges via the boost converter at a flat 105 kW to 90% (owner-measured, no step-down or pause), then the normal taper. Maps keys these tables by charger power only, so the voltage limit has to live in that row; 260/240 kW rows bracket it so other stations near 250 kW stay on the 800 V profile. Energy axis and seconds defined for the 77.4 kWh reference pack and **rescaled at runtime** (see "Capacity scaling"; the 300 s pause is not scaled) |
 | leave out | `1.5`, `1.8`–`1.12`, 6, 9, 10 (Ford works without them) |
 
 ### Unit conversion for EPA-style rolldown (target) coefficients
@@ -131,7 +131,24 @@ The sheet's 10→X% averages (alexonautos test) work out to these averages per b
 
 The 90–100% value comes from the sheet's 165 kW / 25 min for 10–100%. That's too fast: real E-GMP charging tapers to about 30–50 kW above 90%. Use a measured curve there.
 
-For 4.1, x = absolute energy in Wh (SOC × 77400). These are band averages, so the peak inside the 10–50% band is higher (about 230 kW).
+For 4.1, x = absolute energy in Wh (SOC × 77400 for the reference pack; × the learned capacity on the car, see below). These are band averages, so the peak inside the 10–50% band is higher (about 230 kW).
+
+### Capacity scaling (4.1 and 8.1 follow the learned capacity)
+The head unit sends the **learned** usable capacity in `1.4` (~62.9 kWh on the owner's car) and the BMS energy in `1.3`. Maps reads the curve and tables in absolute Wh, so with an unscaled 77.4 kWh axis "100%" (62.9 kWh) sat at ~81% of the reference curve, before almost all of the taper: on the car (2026-10-29) Maps showed **28→100% in 16 min on a 180 kW charger**. Integrating the unscaled 4.1 curve over 17.6→62.9 kWh at 180 kW gives exactly 16.0 min; the unscaled 8.1 tables give 17.1/17.4 min on the 175/200 kW rows.
+
+Charging limits are SOC-based (the BMS tapers by cell voltage), so `EvModelSender.scaleTemplate` multiplies every 4.1 `energy_wh`, every 8.1 `energy_wh` and every 8.1 `seconds` by k = capacity / 77400 (same power at the same SOC, k × the energy per segment). Powers (4.1 `power_w`, 8.1 `charger_power_w`) are untouched; the 300 s thermal pause is a cooling stop and stays 300 s; the Supercharger row stays flat to 90% SOC. The generator widens those varints to 3 bytes (`SCALE_WIDTH`, length prefixes rebuilt; `protoc --decode` of the widened model must equal the canonical encoding) and emits their offsets and reference values into `EvModelTemplate` (`AXIS_*`, `TIME_*`). The sender re-scales only when the capacity changes (cached), inside the tick's catch-all; on failure it sends the unscaled template. The AA message grows from 4045 to 4394 bytes. Host test: `gpm-ev/test/ScaleTest.java`.
+
+At 62.9 kWh (k = 0.813), minutes from the tables (180 kW = 175/200 kW rows interpolated):
+
+| | 10→80% | 28→100% | 80→100% |
+|---|---|---|---|
+| 180 kW, unscaled (before) | 15.9 | 17.2 | 5.3 |
+| 180 kW, scaled | 16.2 | 29.4 | 17.1 |
+| 350 kW, unscaled (before) | 13.3 | 16.5 | 6.3 |
+| 350 kW, scaled | 14.2 | 32.3 | 21.1 |
+| 350 kW, 77.4 kWh reference pack | 17.5 | 38.5 | 24.8 |
+
+Scaled times are shorter than a new pack's because a degraded pack takes in less energy at the same power. Unconfirmed: whether Maps' server uses 4.1, 8.1 or both (the 16 min matches 4.1); both are scaled.
 
 ## Field findings (2026-10-28, from the car and 233 real EA sessions)
 
