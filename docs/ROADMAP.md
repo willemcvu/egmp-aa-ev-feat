@@ -20,20 +20,18 @@ The model is calibrated from a few owner anchor points. Real logged drives would
 - **Storage:** compact CSV under `/data/nemesis/`, rotated with a hard size cap so it can never fill `/data`.
 - **Offload:** on USB insert, copy to `<drive>/egmp-aa-ev-logs/` and mark what's been copied. Needs a small NEMESIS service watching `/storage/usb*` (not the NEMESIS usb-handler).
 - **Analysis:** a host tool that turns logs into Wh/mi against speed and temperature and refits the cold tables (`COLD_DELTA_A`, aux table).
+- **Status (2026-10-29):** built on `dev/logging-capacity`, not yet run on the car. `EvLogger` writes format v1 ([LOGGING.md](LOGGING.md)) into GPM's files dir (32 MB cap); `svc/evlog-offload.sh` copies to drives with an `egmp-aa-ev-logs/` folder. Checker site in `site/`, `tools/evlog.py`. Still to build: the analysis/refit tool.
 
 ## 3. Real usable capacity
 
 The model assumes the new-car 77.4 kWh. At ~100k miles the real usable capacity is probably lower, so Maps overestimates range.
 
-- **Candidates, best first:**
-  1. **BMS state of health** via `tm_hscan_service` transaction 0xd6 (`getXEV_Bms_GDS_SOH`). Already probed and logged once per session; only used with `persist.gpm.ev.sohcap=1`. Needs a check that the raw value is sane (0.1% units).
-  2. **`EV_AVLBL_ENRG`** from the nav battery packet: likely available energy, units unconfirmed. Log it against SOC to see whether it tracks capacity × SOC.
-  3. **Learned from charging:** energy delivered against SOC change over charging sessions (needs logging, item 2).
-- `BMS_EVENERGYCAPA` (HEV flag 0x35) is no use: constant 38700 (77.4 kWh nominal), not degradation-aware.
-- **Goal:** on by default once one source is verified; no manual SOH setting.
+- **Approach (built, not yet run on the car):** usable capacity = BMS remaining energy ÷ display SOC. HEV flag 0x31 `ENERGYMAP_1000MS` is the same signal as the nav packet's `EV_AVLBL_ENRG`, in 2 Wh steps like `BMS_EVENERGYCAPA` ([DATA-SOURCES.md](DATA-SOURCES.md) §1.1). Owner's car: 14462 at 46.0% → 28.9 kWh → **~62.9 kWh usable**. The energy sent to Maps is ENERGYMAP × 2 directly; capacity is learned (preferring ≥ 60% SOC samples, since energy reaches 0 near display 2%) and kept across sessions. No setting.
+- **Not capacity:** BMS SOH (hscan 0xd6, reads 95) is a health index (resistance, balance); logged only. `BMS_EVENERGYCAPA` (0x35) is a constant 38700 (77.4 kWh nominal).
+- **To confirm:** the 2 Wh unit with a logged charge (ΔENERGYMAP × 2 vs charger kWh × ~0.95, DATA-SOURCES.md probe P2), and the high-SOC capacity from a near-full log.
 
 ## To verify (existing features)
 
 - Wireless Android Auto with EV routing (tested wired only).
 - Supercharger charge times: does Maps use the 250 kW table row for Tesla stations?
-- Cold model on the car: the log's `out=` matches the dash (outside temp scaling unconfirmed), and Maps adds a stop on the Burlington → Syracuse trip at ~26 °F.
+- Cold model on the car: the log's `out=` (now raw × 0.5 − 40 °C) matches the dash, and Maps adds a stop on the Burlington → Syracuse trip at ~26 °F.
