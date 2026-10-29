@@ -116,6 +116,11 @@ final class EvLogger {
             Log.w(TAG, "cannot create " + dir);
             return;
         }
+        // The offload service runs as NEMESIS root, which has no
+        // CAP_DAC_OVERRIDE: it can only read these as "other". The logs hold
+        // no personal data, so make them world-readable.
+        dir.setReadable(true, false);
+        dir.setExecutable(true, false);
         prune(dir);
         String product = prop("ro.build.product");
         String prefix = "egmp-" + productShort(product) + "-"
@@ -127,6 +132,7 @@ final class EvLogger {
         }
         sFile = f;
         sOut = new FileOutputStream(f);
+        f.setReadable(true, false);
         sBytes = 0;
         StringBuilder h = new StringBuilder(400);
         h.append("# egmp-aa-ev-log v1\n");

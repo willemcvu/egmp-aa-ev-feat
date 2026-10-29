@@ -118,7 +118,7 @@ public final class EvModelSender {
     private static IBinder sHev;
     private static IBinder sHcan;
     private static int sLastGoodHalfPct = -1;
-    private static int sSohRaw = Integer.MIN_VALUE;      // read once per process
+    private static int sSohRaw = Integer.MIN_VALUE;      // until a value > 0
 
     // nav battery packet state (written by the cluster callback thread)
     private static NavigationCluster sNavCluster;
@@ -453,10 +453,14 @@ public final class EvModelSender {
         return sCapacityEst < 0 ? "nominal" : "bms";
     }
 
+    /** BMS SOH raw; re-read until it reports a value (it reads 0 at boot). */
     static int sohRaw() {
-        if (sSohRaw == Integer.MIN_VALUE) {
-            sSohRaw = getSohRaw();
-            Log.i(TAG, "BMS SOH raw: " + sSohRaw);
+        if (sSohRaw <= 0) {
+            int v = getSohRaw();
+            if (v != sSohRaw) {
+                Log.i(TAG, "BMS SOH raw: " + v);
+            }
+            sSohRaw = v;
         }
         return sSohRaw;
     }
@@ -545,7 +549,8 @@ public final class EvModelSender {
         v[i++] = fresh && sDteBase >= 0 ? Integer.valueOf(sDteBase + sDteAdd) : null;
         v[i++] = Integer.valueOf(Math.round(roadA));
         v[i++] = sColdTempC != Integer.MIN_VALUE ? Integer.valueOf(sColdTempC) : null;
-        v[i++] = sohRaw() >= 0 ? Integer.valueOf(sohRaw()) : null;
+        int soh = sohRaw();
+        v[i++] = soh > 0 ? Integer.valueOf(soh) : null;
         v[i++] = EvModelTemplate.MODEL_REV;
         v[i++] = Float.isNaN(speed) || speed < 0 ? null : Float.valueOf(speed);
         v[i++] = odoDelta;

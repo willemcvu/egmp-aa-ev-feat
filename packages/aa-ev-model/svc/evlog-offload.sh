@@ -48,7 +48,9 @@ up_to_date() {
 offload_to() {
     local _dst="$1/egmp-aa-ev-logs" _f _n _tmp _done=0
     for _f in "$SRC"/*.csv; do
-        [ -f "$_f" ] || continue
+        # readable only if the logger made it so (files from before that
+        # change stay private to GPM; skip them quietly)
+        [ -f "$_f" ] && [ -r "$_f" ] || continue
         _n=${_f##*/}
         up_to_date "$_f" "$_dst/$_n" && continue
         _tmp="$_dst/.$_n.tmp"
