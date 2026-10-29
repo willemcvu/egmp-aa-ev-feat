@@ -9,8 +9,9 @@ Makes Google Maps on Android Auto treat the car as an EV:
   charger (over 50 kW) at most 60 minutes away, the car is asked to warm
   the battery, the same way its own navigation does. Always on. To turn it
   off, switch off "battery conditioning" in the car's EV settings;
-- drive logs: one small file per Android Auto session (battery, temperatures,
-  model values; no location, no full VIN, no times of day), copied to a USB
+- EV logs: one small file each time the head unit is on, driving or
+  charging (battery, speed, temperatures, climate, charging, model values;
+  no location, no full VIN, no times of day), copied to a USB
   drive that has a folder named egmp-aa-ev-logs. Check them and share them
   at https://willemcvu.github.io/egmp-aa-ev-feat/
 
@@ -41,9 +42,10 @@ INSTALL (also upgrades an earlier version in place)
    extra minute). In Google Maps, battery % shows on routes and long trips
    add charging stops.
 
-DRIVE LOGS
+EV LOGS
 Make a folder named egmp-aa-ev-logs on a USB drive and plug it in after
-driving (the phone and the drive may share the one USB data port). A
+driving or charging (the phone and the drive may share the one USB data
+port). A
 pop-up says how many logs were copied; then it's safe to remove.
 
 UNINSTALL

@@ -1,5 +1,6 @@
 #!/bin/sh
-# Compile the EvModelSender/EvModelTemplate and preconditioning (NavProto,
+# Compile the EvModelSender/EvModelTemplate, EV log (EvDriveLog, EvLogger,
+# EvRowAgg, EvCar) and preconditioning (NavProto,
 # PrecondCore, Precond) Java sources to smali in
 # gpm-ev/build/smali, ready for tools/patch_gpm_smali.py.
 # Needs ~/tools/env.sh (Android SDK with platforms/android-19 + build-tools/34).
@@ -15,6 +16,7 @@ javac -source 8 -target 8 \
     -bootclasspath "$ANDROID_HOME/platforms/android-19/android.jar" \
     -d build/classes \
     src/$PKG/EvModelSender.java src/$PKG/EvModelTemplate.java src/$PKG/EvLogger.java \
+    src/$PKG/EvCar.java src/$PKG/EvDriveLog.java src/$PKG/EvRowAgg.java \
     src/$PKG/NavProto.java src/$PKG/PrecondCore.java src/$PKG/Precond.java \
     stubs/$PKG/SensorSource.java \
     stubs/com/hkmc/cluster/NavigationCluster.java \
@@ -26,6 +28,9 @@ javac -source 8 -target 8 \
     build/classes/$PKG/EvModelSender*.class \
     "build/classes/$PKG/EvModelTemplate.class" \
     build/classes/$PKG/EvLogger*.class \
+    build/classes/$PKG/EvCar*.class \
+    build/classes/$PKG/EvDriveLog*.class \
+    build/classes/$PKG/EvRowAgg*.class \
     build/classes/$PKG/NavProto*.class \
     build/classes/$PKG/Precond*.class
 

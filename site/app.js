@@ -80,7 +80,7 @@
     head.appendChild(el("h3", null, origName));
     card.appendChild(head);
     if (result.error) {
-      card.appendChild(el("p", "err", "Can't use this file: " + result.error + ". Is it a drive log from egmp-aa-ev-feat?"));
+      card.appendChild(el("p", "err", "Can't use this file: " + result.error + ". Is it an EV log from egmp-aa-ev-feat?"));
       return card;
     }
     var dl = el("dl", "summary");

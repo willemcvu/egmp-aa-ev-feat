@@ -223,6 +223,16 @@ First: `adb shell service list | grep -iE 'hkmc|hscan'` to confirm the service n
 | P9 | `service call com.hkmc.micom.hev 3 i32 34` / `35` (target SOC AC/DC) vs the EV settings screen | encoding (%, or 10 % steps) |
 | P10 | `service call tm_hscan_service 47` (VIN). **Personal: don't commit the output** | VIN source works |
 
+## What the EV log reads (v2, `EvCar`)
+
+Implemented for log format v2 ([LOGGING.md](LOGGING.md)), all getters, read as GPM's system uid:
+
+- **DATC climate state**: `IDATCService.getVRClimateStatus(int)` (txn 0x29, `com.hkmc.micom.datc`) returns floats straight from the service's caches: flag 2 = driver set temp in the display unit (`DatcStatus.getDrTempC/F`), 5 = `MainBlowerDisp`, 6 = `ModeDisp`, 8 = `AutoDisp`, 9 = `AcDisp`, 12 = `OpSts`, 13 = `TempUnit`; −1.0 = unsupported flag. `isUnitCelsius(int)` (txn 6) converts the unit. `getClimateInfo(int)` (txn 0x26) is **not** useful here: it answers configuration flags (`DATCFlag$DATCConstants`), not live state. No permission checks; every call writes a `Slog.d` line in the DATC service.
+- **Drive mode**: `IBCMService.registerBCMListener(listener, cb)` (txn 1) with a raw `Binder` implementing `IBCMListener` (only `onDriveModeChanged`, txn 0x11, is read; all other callbacks are void and acknowledged). The service pushes its cached `mDriveMode` on registration and every change (`BCMServiceHandler`). `getDriveMode()` (txn 0xc) is avoided: it sends a MICOM command (0x3a/0x43) and the reply path can show the drive-mode OSD.
+- **Charging**: HEV 0x28, 0x0f (quick-charge remaining, min; owner confirmed it matches the dash), 0x22/0x23 (target SOC, 0.5 % steps), 0x52, 0x53, 0x6c (0x7fff invalid when not charging), 0x1d, 0x07; battery heater live power 0x43.
+- **Altitude**: `LocationManager.getLastKnownLocation("gps")`, altitude only, fix under 10 s old.
+- Invalid on this car (not logged): HEV 0x41 PTC, 0x2a compressor, 0x08 eco level.
+
 ## Recommended logging changes (for `EvModelSender`)
 
 *(All implemented in v0.2.0; see `EvModelSender` and [LOGGING.md](LOGGING.md). The trip sums are logged every 5 s row, not once a minute, and capacity uses a smoothed estimate preferring ≥ 60 % samples rather than a median.)*

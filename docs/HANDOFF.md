@@ -20,7 +20,7 @@ The stock head unit does none of these. On top of that the package now precondit
 | `ENERGY-MODEL.md` | the energy-model blob: recovered schema, field meanings, Ioniq 5 values, capacity scaling, charge-time semantics |
 | `DATA-SOURCES.md` | every vehicle signal the head unit exposes and how to read it |
 | `PRECONDITIONING.md` | automatic preconditioning: car interface, Maps' nav messages, rules, tests |
-| `LOGGING.md` | drive log format v1 and tools |
+| `LOGGING.md` | EV log format (v2) and tools |
 | `reference/vehicle_energy_model.proto` | the schema; encode with `protoc --encode=vem.VehicleEnergyModel` |
 
 Local, gitignored inputs: `private/car-current-leafia105/` (the live GPM APK/odex, AA library, baksmali output), `private/car-neev-260507/smali/` (car framework incl. `HEVManager`), `private/staging/leafia-v1.0.5/` (Leafia package to copy install conventions from), `reference/ford_ev_model.bin` (known-good model blob).
@@ -31,14 +31,14 @@ Local, gitignored inputs: `private/car-current-leafia105/` (the live GPM APK/ode
 1. `tools/patch_library.py` → `dist/libautoreceiver_infobank.so`: the three §5d patches, verified to differ from Leafia's only at 7 intended bytes.
 2. `tools/build_ioniq5_model.py` → `dist/ev_model.bin` / `dist/ev_batch.bin` / generated `EvModelTemplate.java`: the Ioniq 5 model (rolldown road load, drivetrain and battery losses, heater/aux table, cold road-load table, charge curve and 13 charge-time rows in headroom form), with offsets of every runtime-patched value.
 3. `gpm-ev/` (javac → d8 → baksmali, `gpm-ev/build.sh`):
-   - `EvModelSender`: every 5 s, SOC (HEV 0x19), BMS energy (HEV 0x31 × 2 Wh, sent as current energy), learned usable capacity (energy ÷ SOC, kept in `files/capacity_wh`), outside temp from the nav battery packet (raw × 0.5 − 40 °C) → model field 1.7 and road load A; scales the charge curve/tables to the capacity; writes a log row.
+   - `EvModelSender`: every 5 s, SOC (HEV 0x19), BMS energy (HEV 0x31 × 2 Wh, sent as current energy), learned usable capacity (energy ÷ SOC, kept in `files/capacity_wh`), outside temp from the nav battery packet (raw × 0.5 − 40 °C) → model field 1.7 and road load A; scales the charge curve/tables to the capacity. Reads the car through `EvCar` (shared with the logger).
    - `Precond` / `PrecondCore` / `NavProto`: automatic preconditioning (`PRECONDITIONING.md`).
-   - `EvLogger`: one CSV per AA session in GPM's files dir (`LOGGING.md`).
-4. `tools/patch_gpm_smali.py` → `build/gpm-smali`: `SensorSource` (fuel type, connectors, sensor 23, sender start/stop, raw send) and the `GpmNaviTBTManager` hooks for `Precond`. `persist.gpm.ev.off=1` gates the `SensorSource` edits.
+   - `EvDriveLog` / `EvRowAgg` / `EvLogger` / `EvCar`: the always-on EV log, one CSV per head-unit "on" period in GPM's files dir, 1 s samples, 5 s rows, written once a minute, 100 MB folder cap (`LOGGING.md`).
+4. `tools/patch_gpm_smali.py` → `build/gpm-smali`: `SensorSource` (fuel type, connectors, sensor 23, sender start/stop, raw send), the `GpmNaviTBTManager` hooks for `Precond`, and the `StartReceiver`/`GalReceiverService` hooks that start the always-on `EvDriveLog`. `persist.gpm.ev.off=1` gates the `SensorSource` edits (not the EV log).
 5. `dist/HKMC_GPM.apk` = Leafia APK with only `classes.dex` replaced.
 6. `packages/aa-ev-model/` → `dist/aa.ev.model.zip`: md5-gated on the Leafia v1.0.5 files (or this package's own, for an upgrade), snapshot + byte-for-byte uninstall only if live files are still ours, plus the `evlog-offload` service. It carries only lpatch deltas, no Hyundai/Google binaries.
 
-Verified on the car: EV routing; capacity ~62.9 kWh learned from the BMS; outside temp matches the dash; Maps' charge times look right; preconditioning REQUESTED → ACTIVE on short routes, cancel on route end (Off within ~2.5 s), stays REQUESTED on a 58-min route; drive logs copied to USB with the pop-up.
+Verified on the car: EV routing; capacity ~62.9 kWh learned from the BMS; outside temp matches the dash; Maps' charge times look right; preconditioning REQUESTED → ACTIVE on short routes, cancel on route end (Off within ~2.5 s), stays REQUESTED on a 58-min route; EV logs (v1) copied to USB with the pop-up.
 
 Tests (host): `sh gpm-ev/test/run.sh` (PrecondTest, SenderRowTest, ScaleTest), `bash tools/test_package.sh` (install / uninstall / upgrade / Leafia-removed-in-between / refusal / log offload in a sandbox), `sh tools/test_evlog.sh`.
 
@@ -58,7 +58,7 @@ USB: copy the release zip's contents to a drive, plug it in, tap Yes (`release/R
 1. `adb connect <car-ip>:5555`, `adb push dist/aa.ev.model.zip /data/local/tmp/`
 2. `adb shell /system/xbin/nemesis install --update /data/local/tmp/aa.ev.model.zip` (`--update` runs the installed version's preuninstall first; the package upgrades in place)
 3. The head unit reboots by itself when the install succeeds (ADB drops). Check `/data/nemesis/aa.ev.model.log` (`nemesis root -c 'cat …'`): expect `rebuilt payloads …`, `preinstall ok`, `OK: … replaced` ×2, `done - rebooting`. A refused install changes nothing and doesn't reboot; the log says why.
-4. Stream `adb logcat -v time -s EvModelSender EvPrecond EvLogger` **before** plugging in AA. Expect `energy model sent: <N> Wh of <C> …, out=<°C>` every 5 s.
+4. Stream `adb logcat -v time -s EvModelSender EvPrecond EvDriveLog EvCar` **before** plugging in AA. Expect `energy model sent: <N> Wh of <C> …, out=<°C>` every 5 s.
 5. Off switch: `setprop persist.gpm.ev.off 1`, replug AA (`0` to re-enable). Uninstall: NEMESIS Manager or `nemesis uninstall aa.ev.model`, then reboot; restores Leafia's files byte for byte.
 
 ## Troubleshooting (operational notes)
@@ -69,7 +69,7 @@ USB: copy the release zip's contents to a drive, plug it in, tap Yes (`release/R
 - **Wi-Fi shows "error" after a reboot:** the Wi-Fi chip occasionally fails to power up. A full power-down of the car (not just a head-unit reboot) fixes it.
 - **Root is limited:** NEMESIS root has only CAP_SETUID/SETGID, no DAC override. To read GPM's files, act as its system uid: `nemesis root 1000 -c '…'`.
 - **No text tools on the unit:** no `sed`, `awk`, `wc`, `head`, `tail` or `stat`. Scripts use `ls -l`, `cmp`, `grep` and shell builtins.
-- **Logs:** install `/data/nemesis/aa.ev.model.log`; offload `/data/nemesis/aa.ev.model.offload.log`; drive logs `/data/data/com.google.android.projection.sink/files/evlog/`.
+- **Logs:** install `/data/nemesis/aa.ev.model.log`; offload `/data/nemesis/aa.ev.model.offload.log`; EV logs `/data/data/com.google.android.projection.sink/files/evlog/`.
 
 ## Requirements (unchanged)
 

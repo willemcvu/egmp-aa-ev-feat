@@ -1,4 +1,4 @@
-# Publishes site/ (the drive-log checker) to GitHub Pages.
+# Publishes site/ (the EV-log checker) to GitHub Pages.
 # One-time setup: Settings -> Pages -> Source = "GitHub Actions".
 name: Pages
 

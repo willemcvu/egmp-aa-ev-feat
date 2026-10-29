@@ -4,15 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>E-GMP drive logs</title>
-<meta name="description" content="Check, clean and contribute Android Auto EV drive logs from Hyundai/Kia/Genesis E-GMP cars to improve the egmp-aa-ev-feat energy model.">
+<title>E-GMP EV logs</title>
+<meta name="description" content="Check, clean and contribute EV logs (driving and charging) from Hyundai/Kia/Genesis E-GMP cars to improve the egmp-aa-ev-feat energy model.">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
   <div class="wrap">
     <p class="kicker"><a href="https://github.com/willemcvu/egmp-aa-ev-feat">egmp-aa-ev-feat</a></p>
-    <h1>Contribute drive logs</h1>
+    <h1>Contribute EV logs</h1>
     <p class="lede">Help Google Maps predict range better on Ioniq 5, Ioniq 6, EV6, EV9 and GV60 head units.</p>
   </div>
 </header>
@@ -20,12 +20,12 @@
 <main class="wrap">
   <section>
     <h2>What these logs are</h2>
-    <p>With <a href="https://github.com/willemcvu/egmp-aa-ev-feat">egmp-aa-ev-feat</a> installed, the head unit sends Google Maps an energy model of the car: how much energy it uses at a given speed and temperature, and how fast it charges. That model is fitted from only a few data points, mostly from one Ioniq 5. A log records, every few seconds while Android Auto is connected, the battery level, temperatures and the model values the car sent, so we can compare what Maps predicted with what the car really used, and fit the model for more cars, climates and battery ages.</p>
+    <p>With <a href="https://github.com/willemcvu/egmp-aa-ev-feat">egmp-aa-ev-feat</a> installed, the head unit sends Google Maps an energy model of the car: how much energy it uses at a given speed and temperature, and how fast it charges. That model is fitted from only a few data points, mostly from one Ioniq 5. A log records, every few seconds whenever the head unit is on (driving, charging or parked, with or without Android Auto), the battery level and energy, speed, temperatures, climate and charging state, and the model values sent to Maps, so we can compare what Maps predicted with what the car really used, and fit the model for more cars, climates and battery ages.</p>
   </section>
 
   <section>
     <h2>What is recorded</h2>
-    <p>One CSV file per Android Auto session. Only the fields below exist in the format; this page and <code>tools/evlog.py</code> remove anything else before you share a file.</p>
+    <p>One CSV file each time the head unit is on. Only the fields below exist in the format; this page and <code>tools/evlog.py</code> remove anything else before you share a file.</p>
     <details>
       <summary>Session details (<span id="n-header">…</span> fields)</summary>
       <table class="fields" id="tbl-header"><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody></tbody></table>
@@ -46,7 +46,7 @@
       <li>Plug the drive into the car's USB data port (the one Android Auto uses) with the car on.</li>
       <li>The head unit copies new logs into that folder by itself. Leave the drive in for a minute, then take it out.</li>
     </ol>
-    <p class="note">The logging part on the car is being built and isn't in a release yet. Cold drives, highway trips and fast-charging sessions are the most useful.</p>
+    <p class="note">Logging whenever the head unit is on (including while charging, without Android Auto) comes with the next release; v0.2.0 logs during Android Auto sessions. Cold drives, highway trips and fast-charging sessions are the most useful.</p>
   </section>
 
   <section id="tool">

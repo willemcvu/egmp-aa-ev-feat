@@ -10,12 +10,12 @@ When Google Maps on Android Auto is guiding to a DC fast charger, ask the car to
 - **Status (2026-10-29): verified on the car.** Always on, no switch (the car's battery-conditioning setting is the off control). Triggers when the next stop is a charging stop above 50 kW at most 60 min away. On short routes the request goes REQUESTED → ACTIVE (the car's indicator comes on); ending the route cancels it (Off within ~2.5 s); on a 58-min route it stays REQUESTED while the BMS waits to heat.
 - **Still open:** a real multi-stop drive (is the single 0x8007 entry always the next stop?) and a cold-morning drive to a charger.
 
-## 2. Drive logging for model calibration (logging done, analysis next)
+## 2. EV logging for model calibration (logging done, analysis next)
 
-The model is calibrated from a few owner anchor points. Real logged drives let us fit it properly (cold penalty split, drivetrain losses, real capacity).
+The model is calibrated from a few owner anchor points. Real logged drives and charging sessions let us fit it properly (cold penalty split, drivetrain losses, real capacity).
 
 - **Goal:** the head unit logs on its own, and the logs are copied off when a USB drive is plugged in. No ADB, no laptop in the car.
-- **Status (2026-10-29): verified on the car.** `EvLogger` writes format v1 ([LOGGING.md](LOGGING.md)) every 5 s into GPM's files dir (32 MB cap). `svc/evlog-offload.sh` copies new logs to any drive with an `egmp-aa-ev-logs/` folder and shows a head-unit pop-up once per insertion (6 logs copied in the first test). On this car the phone and the drive share the one USB data port, so logs are copied when the drive is plugged in after a session. Checker site in `site/`, `tools/evlog.py`.
+- **Status (2026-10-29): v1 verified on the car.** `EvLogger` wrote format v1 every 5 s during Android Auto sessions. **v2 (built, not yet on the car):** `EvDriveLog` logs whenever the head unit is on (driving, charging, parked; `aa_active` column), samples every 1 s, writes a row every 5 s and appends to the file once a minute; charging, climate, drive-mode, altitude-change and Maps charging-plan columns ([LOGGING.md](LOGGING.md)); 100 MB folder cap. `svc/evlog-offload.sh` copies new logs to any drive with an `egmp-aa-ev-logs/` folder and shows a head-unit pop-up once per insertion (6 logs copied in the first test). On this car the phone and the drive share the one USB data port, so logs are copied when the drive is plugged in after a session. Checker site in `site/`, `tools/evlog.py`.
 - **Still to build:** the analysis tool that turns logs into Wh/mi against speed and temperature and refits the cold tables (`COLD_DELTA_A`, aux table). That is the input to item 4.
 
 ## 3. Real usable capacity (done)
@@ -29,7 +29,7 @@ The model assumed the new-car 77.4 kWh. At ~105k miles the real usable capacity 
 
 ## 4. Self-adjusting model (next)
 
-Use the drive logs (item 2) to correct the model on the car: compare predicted and actual energy use per drive and adjust road load / aux power, so the model follows the actual car, season and tyres without manual recalibration. Start offline (the analysis tool refits the tables from submitted logs), then consider a slow on-car correction with tight bounds.
+Use the EV logs (item 2) to correct the model on the car: compare predicted and actual energy use per drive and adjust road load / aux power, so the model follows the actual car, season and tyres without manual recalibration. Start offline (the analysis tool refits the tables from submitted logs), then consider a slow on-car correction with tight bounds.
 
 ## To verify (existing features)
 

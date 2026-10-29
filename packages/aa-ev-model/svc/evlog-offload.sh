@@ -1,8 +1,8 @@
 #!/system/bin/sh
-# aa.ev.model: copy drive logs to a USB drive (docs/LOGGING.md).
+# aa.ev.model: copy EV logs to a USB drive (docs/LOGGING.md).
 #
-# GPM writes one CSV per Android Auto session into its own files dir (see
-# EvLogger). Every POLL_S this copies any log that is new or has grown to
+# GPM writes one CSV per head-unit "on" period into its own files dir and
+# appends to it once a minute (see EvDriveLog/EvLogger). Every POLL_S this copies any log that is new or has grown to
 # <drive>/egmp-aa-ev-logs/ on every mounted USB drive that HAS that folder
 # (the folder is the opt-in: drives without it are never written to). The
 # copy goes to a .tmp name, is verified with cmp, then renamed, so a pulled
@@ -97,11 +97,11 @@ announce() {
     case "$ANNOUNCED" in *" $1 "*) return 0 ;; esac
     ANNOUNCED="$ANNOUNCED$1 "
     if [ "$FAILED" -gt 0 ]; then
-        toast "AA EV drive logs: $COPIED copied, $FAILED failed. See /data/nemesis/aa.ev.model.offload.log."
+        toast "AA EV logs: $COPIED copied, $FAILED failed. See /data/nemesis/aa.ev.model.offload.log."
     elif [ "$COPIED" -gt 0 ]; then
-        toast "AA EV drive logs: $COPIED copied to the USB drive (egmp-aa-ev-logs). Safe to remove."
+        toast "AA EV logs: $COPIED copied to the USB drive (egmp-aa-ev-logs). Safe to remove."
     else
-        toast "AA EV drive logs: the USB drive is already up to date."
+        toast "AA EV logs: the USB drive is already up to date."
     fi
 }
 

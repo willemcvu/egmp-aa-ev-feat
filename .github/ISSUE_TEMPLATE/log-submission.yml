@@ -50,7 +50,7 @@ body:
     id: conditions
     attributes:
       label: Conditions (optional)
-      description: Roughly what the drives were like (highway, city, towing, roof box, winter tyres, cabin heat). No places or addresses.
+      description: Roughly what the drives and charging sessions were like (highway, city, towing, roof box, winter tyres, cabin heat, DC or AC charging). No places or addresses.
   - type: textarea
     id: files
     attributes:

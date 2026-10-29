@@ -1,193 +1,229 @@
 package com.google.android.projection.protocol;
 
-import android.os.Build;
-import android.util.Log;
-
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.text.SimpleDateFormat;
 import java.util.Arrays;
-import java.util.Date;
-import java.util.Locale;
-import java.util.TimeZone;
 
 /**
- * Drive log for model calibration (docs/LOGGING.md, format v1).
+ * Buffered CSV writer for the EV log (docs/LOGGING.md), with hard size caps.
+ * Plain java.io (no Android), so the host test drives it with a temp dir.
  *
- * One CSV per Android Auto session in GPM's files dir (evlog/), written by
- * EvModelSender every PERIOD_MS. Technical data only: no location, no
- * addresses or names, no wall-clock times (date only), no full VIN. The
- * NEMESIS service svc/evlog-offload.sh copies new and grown files to any USB
- * drive that has an egmp-aa-ev-logs/ folder.
+ * Rows are kept in memory (append) and written by flush(), which EvDriveLog
+ * calls once a minute and on a clean stop. Each flush opens the file in
+ * append mode, writes, and closes it again, so no file descriptor is held
+ * and the offload service sees whole rows.
  *
- * Size limits: a file is closed at MAX_FILE_BYTES (a new one continues the
- * session) and the oldest files are deleted while the folder is over
- * MAX_DIR_BYTES, so it can never fill /data. Callers hold EvModelSender.LOCK.
+ * Caps, enforced before every write:
+ *  - a file never grows past maxFileBytes: the write goes to a new file
+ *    (same session, next sequence number, fresh header);
+ *  - the folder never holds more than maxDirBytes: the oldest files (by
+ *    name: date, then sequence) are deleted first so that the total after
+ *    the write stays within the cap (see pruneVictims). The current file is
+ *    never deleted to make room for itself.
+ *  - the in-memory buffer is bounded (maxBufferChars; oldest rows dropped)
+ *    for when the folder can't be written.
+ *
+ * Not thread-safe: EvDriveLog serialises all calls.
  */
 final class EvLogger {
-    private static final String TAG = "EvLogger";
-    static final String PKG = "aa.ev.model 0.2.0";
-    private static final String DIR = "evlog";
-    private static final long MAX_FILE_BYTES = 4L * 1024 * 1024;
-    private static final long MAX_DIR_BYTES = 32L * 1024 * 1024;
+    static final String DIR = "evlog";
+    static final long MAX_FILE_BYTES = 4L * 1024 * 1024;
+    static final long MAX_DIR_BYTES = 100L * 1024 * 1024;
+    static final int MAX_BUFFER_CHARS = 256 * 1024;
 
-    // Column order of this writer. Every name must be on the format's
-    // allowlist (site/schema.json); empty = unknown.
-    static final String[] COLUMNS = {
-        "t_s", "soc_half_pct", "energy_wh", "capacity_wh", "avlbl_enrg_raw",
-        "out_temp_raw", "out_temp_c", "pack_min_c", "dte_raw", "road_a_n",
-        "aux_table_c", "soh_raw", "model_rev", "speed_kph", "odo_delta_km",
-        "trip_batt_raw", "trip_clim_raw", "trip_ldc_raw", "trip_bheat_raw",
-        "trip_mot1_raw", "trip_mot2_raw", "trip_gen1_raw", "trip_gen2_raw",
-        "hvac_raw", "charge_state_raw", "nav_active", "nav_rem_m", "nav_rem_s",
-        "nav_charger", "nav_charger_kw", "precond_state",
-    };
-
-    private static FileOutputStream sOut;
-    private static File sFile;
-    private static long sBytes;
-    private static long sStartMs;
-    private static String sDate;
-
-    private EvLogger() {}
-
-    /** Start a session: the next row() opens a new file. */
-    static void startSession(long nowMs) {
-        close();
-        sStartMs = nowMs;
-        SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
-        f.setTimeZone(TimeZone.getTimeZone("UTC"));
-        sDate = f.format(new Date());
+    /** Where status messages go (android.util.Log on the car). */
+    interface Sink {
+        void log(String msg);
     }
 
-    /** Append one row; values in COLUMNS order after t_s (null = unknown). */
-    static void row(long nowMs, Object... values) {
-        if (sDate == null) {
-            return;
+    private final File dir;
+    private final long maxFileBytes;
+    private final long maxDirBytes;
+    private final int maxBufferChars;
+    private final Sink sink;
+    private final StringBuilder buf = new StringBuilder(4096);
+    private File cur;          // file of this session, null until first flush
+    private long curBytes;
+    private int droppedRows;
+
+    EvLogger(File dir, long maxFileBytes, long maxDirBytes, int maxBufferChars,
+            Sink sink) {
+        this.dir = dir;
+        this.maxFileBytes = maxFileBytes;
+        this.maxDirBytes = maxDirBytes;
+        this.maxBufferChars = maxBufferChars;
+        this.sink = sink;
+    }
+
+    /** Buffer one row (must end with '\n'). */
+    void append(String row) {
+        buf.append(row);
+        if (buf.length() > maxBufferChars) {
+            // keep the newest rows: cut whole lines from the front
+            int cut = buf.length() - maxBufferChars;
+            int nl = buf.indexOf("\n", cut - 1);
+            int end = nl < 0 ? buf.length() : nl + 1;
+            for (int i = 0; i < end; i++) {
+                if (buf.charAt(i) == '\n') {
+                    droppedRows++;
+                }
+            }
+            buf.delete(0, end);
+        }
+    }
+
+    int pendingChars() {
+        return buf.length();
+    }
+
+    File currentFile() {
+        return cur;
+    }
+
+    /** The next flush starts a new file (a new head-unit "on" period). */
+    void startNewFile() {
+        cur = null;
+        curBytes = 0;
+    }
+
+    /**
+     * Write the buffered rows. prefix is the file name up to the sequence
+     * number ("egmp-NEEV-20261029-"); header is the full header (magic line
+     * through the column row), used only when a new file is opened. Returns
+     * true when the buffer was written (or empty). Never throws.
+     */
+    boolean flush(String prefix, String header) {
+        if (buf.length() == 0) {
+            return true;
         }
         try {
-            if (sOut == null || sBytes >= MAX_FILE_BYTES) {
-                open();
-                if (sOut == null) {
-                    return;
-                }
+            if (dir == null) {
+                return false;
             }
-            StringBuilder b = new StringBuilder(160);
-            b.append((nowMs - sStartMs) / 1000);
-            for (int i = 0; i < COLUMNS.length - 1; i++) {
-                b.append(',');
-                Object v = i < values.length ? values[i] : null;
-                if (v != null) {
-                    b.append(v);
-                }
+            if (!dir.isDirectory() && !dir.mkdirs()) {
+                sink.log("cannot create " + dir);
+                return false;
             }
-            b.append('\n');
-            write(b.toString());
-        } catch (Throwable t) {
-            Log.w(TAG, "log write failed, closing: " + t);
-            close();
-        }
-    }
+            // The offload service runs as NEMESIS root, which has no
+            // CAP_DAC_OVERRIDE: it can only read these as "other". The logs
+            // hold no personal data, so make them world-readable.
+            dir.setReadable(true, false);
+            dir.setExecutable(true, false);
 
-    static void close() {
-        if (sOut != null) {
+            byte[] rows = buf.toString().getBytes("US-ASCII");
+            boolean open = cur == null || !cur.isFile()
+                    || curBytes + rows.length > maxFileBytes;
+            File target = cur;
+            byte[] hdr = new byte[0];
+            if (open) {
+                target = nextFile(prefix);
+                hdr = header.getBytes("US-ASCII");
+            }
+            long incoming = hdr.length + rows.length;
+            if (!makeRoom(open ? null : target.getName(), incoming)) {
+                sink.log("log folder full even after pruning; dropping "
+                        + rows.length + " bytes");
+                buf.setLength(0);
+                return false;
+            }
+            FileOutputStream out = new FileOutputStream(target, true);
             try {
-                sOut.close();
-            } catch (IOException ignored) {
+                out.write(hdr);
+                out.write(rows);
+            } finally {
+                out.close();
             }
+            target.setReadable(true, false);
+            if (open) {
+                sink.log("logging to " + target.getName());
+            }
+            cur = target;
+            curBytes = target.length();
+            buf.setLength(0);
+            if (droppedRows > 0) {
+                sink.log(droppedRows + " rows dropped while the folder was unwritable");
+                droppedRows = 0;
+            }
+            return true;
+        } catch (Throwable t) {
+            sink.log("log write failed (kept in memory): " + t);
+            return false;
         }
-        sOut = null;
-        sFile = null;
     }
 
-    static void endSession() {
-        close();
-        sDate = null;
-    }
-
-    private static void open() throws IOException {
-        close();
-        File dir = EvModelSender.appFile(DIR);
-        if (dir == null) {
-            return;
-        }
-        if (!dir.isDirectory() && !dir.mkdirs()) {
-            Log.w(TAG, "cannot create " + dir);
-            return;
-        }
-        // The offload service runs as NEMESIS root, which has no
-        // CAP_DAC_OVERRIDE: it can only read these as "other". The logs hold
-        // no personal data, so make them world-readable.
-        dir.setReadable(true, false);
-        dir.setExecutable(true, false);
-        prune(dir);
-        String product = prop("ro.build.product");
-        String prefix = "egmp-" + productShort(product) + "-"
-                + sDate.replace("-", "") + "-";
+    private File nextFile(String prefix) {
         int seq = 1;
         File f;
         while ((f = new File(dir, prefix + pad3(seq) + ".csv")).exists()) {
             seq++;
         }
-        sFile = f;
-        sOut = new FileOutputStream(f);
-        f.setReadable(true, false);
-        sBytes = 0;
-        StringBuilder h = new StringBuilder(400);
-        h.append("# egmp-aa-ev-log v1\n");
-        header(h, "product", product);
-        header(h, "device", Build.DEVICE);
-        header(h, "vin_model", EvModelSender.vinModel());
-        header(h, "pkg", PKG);
-        header(h, "model_capacity_wh", String.valueOf(EvModelTemplate.CAPACITY_WH));
-        header(h, "capacity_source", EvModelSender.capacitySource());
-        header(h, "date", sDate);
-        header(h, "period_s", "5");
-        for (int i = 0; i < COLUMNS.length; i++) {
-            if (i > 0) {
-                h.append(',');
-            }
-            h.append(COLUMNS[i]);
-        }
-        h.append('\n');
-        write(h.toString());
-        Log.i(TAG, "logging to " + f.getName());
+        return f;
     }
 
-    private static void write(String s) throws IOException {
-        byte[] b = s.getBytes("US-ASCII");
-        sOut.write(b);
-        sOut.flush();
-        sBytes += b.length;
-    }
-
-    private static void header(StringBuilder h, String key, String value) {
-        if (value == null || value.length() == 0) {
-            return;
-        }
-        // values are ids/numbers: keep them to a safe charset
-        h.append("# ").append(key).append('=')
-                .append(value.replaceAll("[^A-Za-z0-9._ -]", "")).append('\n');
-    }
-
-    /** Delete the oldest logs (by name: date, then sequence) over the cap. */
-    private static void prune(File dir) {
+    /** Delete the oldest files so that total + incoming fits the cap. */
+    private boolean makeRoom(String keep, long incoming) {
         File[] files = dir.listFiles();
         if (files == null) {
-            return;
+            files = new File[0];
         }
-        Arrays.sort(files);
+        String[] names = new String[files.length];
+        long[] sizes = new long[files.length];
+        for (int i = 0; i < files.length; i++) {
+            names[i] = files[i].getName();
+            sizes[i] = files[i].length();
+        }
+        int[] victims = pruneVictims(names, sizes, keep, incoming, maxDirBytes);
         long total = 0;
-        for (File f : files) {
-            total += f.length();
+        for (long s : sizes) {
+            total += s;
         }
-        for (int i = 0; i < files.length && total > MAX_DIR_BYTES; i++) {
-            total -= files[i].length();
-            if (!files[i].delete()) {
-                Log.w(TAG, "cannot delete " + files[i].getName());
+        for (int i : victims) {
+            if (files[i].delete()) {
+                total -= sizes[i];
+                sink.log("deleted old log " + names[i] + " (folder cap)");
+            } else {
+                sink.log("cannot delete " + names[i]);
             }
         }
+        return total + incoming <= maxDirBytes;
+    }
+
+    /**
+     * Which files to delete, oldest first (sorted by name), so that the
+     * folder total plus incoming bytes is at most cap. Never picks keep.
+     * If even deleting everything else can't make it fit, returns every
+     * file but keep (the caller then refuses the write).
+     */
+    static int[] pruneVictims(String[] names, long[] sizes, String keep,
+            long incoming, long cap) {
+        long total = 0;
+        for (long sz : sizes) {
+            total += sz;
+        }
+        boolean[] taken = new boolean[names.length];
+        int[] out = new int[names.length];
+        int n = 0;
+        // oldest first: repeatedly the smallest name not yet considered
+        // (a few hundred files at most, so O(n^2) is fine)
+        while (total + incoming > cap) {
+            int best = -1;
+            for (int i = 0; i < names.length; i++) {
+                if (!taken[i] && (best < 0 || names[i].compareTo(names[best]) < 0)) {
+                    best = i;
+                }
+            }
+            if (best < 0) {
+                break;
+            }
+            taken[best] = true;
+            if (names[best].equals(keep)) {
+                continue;
+            }
+            out[n++] = best;
+            total -= sizes[best];
+        }
+        return Arrays.copyOf(out, n);
     }
 
     static String productShort(String product) {
@@ -196,20 +232,35 @@ final class EvLogger {
         }
         int dot = product.indexOf('.');
         String s = dot > 0 ? product.substring(0, dot) : product;
-        return s.replaceAll("[^A-Za-z0-9]", "");
+        s = s.replaceAll("[^A-Za-z0-9]", "");
+        return s.length() == 0 ? "unknown" : s;
     }
 
-    private static String pad3(int n) {
+    static String pad3(int n) {
         return n < 10 ? "00" + n : n < 100 ? "0" + n : String.valueOf(n);
     }
 
-    private static String prop(String key) {
-        try {
-            return (String) Class.forName("android.os.SystemProperties")
-                    .getMethod("get", String.class, String.class)
-                    .invoke(null, key, "");
-        } catch (Throwable t) {
-            return "";
+    /** One "# key=value" header line; values kept to a safe charset. */
+    static void header(StringBuilder h, String key, String value) {
+        if (value == null || value.length() == 0) {
+            return;
         }
+        h.append("# ").append(key).append('=')
+                .append(value.replaceAll("[^A-Za-z0-9._ -]", "")).append('\n');
+    }
+
+    /** One CSV row: values as strings, null = empty (unknown). */
+    static String csvRow(Object[] values) {
+        StringBuilder b = new StringBuilder(320);
+        for (int i = 0; i < values.length; i++) {
+            if (i > 0) {
+                b.append(',');
+            }
+            if (values[i] != null) {
+                b.append(values[i]);
+            }
+        }
+        b.append('\n');
+        return b.toString();
     }
 }

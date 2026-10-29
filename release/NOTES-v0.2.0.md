@@ -8,7 +8,7 @@ For the 2022 Ioniq 5 (US), Gen5W software 260507, with NEMESIS and HMG Leafia Pl
 - **Cold-weather model** driven by the live outside temperature.
 - **Realistic charge times**, including the slow last 10–20 %. (Earlier versions sent the charge tables in a form Maps misread, so 100 % looked much faster than it is.)
 - **Automatic battery preconditioning** when the next stop is a charger over 50 kW within an hour. Turn it off with the car's *battery conditioning* setting.
-- **Drive logs** copied to a USB drive with an `egmp-aa-ev-logs` folder, with a pop-up when done. Check and share them on the [drive log checker](https://willemcvu.github.io/egmp-aa-ev-feat/).
+- **EV logs** copied to a USB drive with an `egmp-aa-ev-logs` folder, with a pop-up when done. Check and share them on the [EV log checker](https://willemcvu.github.io/egmp-aa-ev-feat/).
 
 ## Install
 

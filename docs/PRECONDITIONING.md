@@ -136,7 +136,7 @@ Built 2026-10-29 into the same GPM `classes.dex` as the EV-model patch (`tools/b
 
 - `NavProto`: minimal protobuf reader for the `S` (0x8006) and `P` (0x8007) NAVDUMP strings. Returns destinations (index, charging stop present, departure Wh, charger kW from field 2's watts, planned charging seconds) and {metres, seconds} entries. Rejects truncated payloads (declared length must match the hex). Addresses are never stored or logged. Only a hash is kept in memory, as the stop's identity.
 - `PrecondCore`: the decision logic, pure Java, with the car, journal and log behind interfaces.
-- `Precond`: Android shell. One `HandlerThread` (`EvPrecond`); binder access modelled on Launchpad's `OemVehicleClient`; the ownership journal `files/evprecond.owned` in GPM's data dir; static getters (`navActive()`, `remainingMeters()`, `remainingSeconds()`, `isCharger()`, `chargerKw()`, `state()`/`stateName()`) for the drive logger.
+- `Precond`: Android shell. One `HandlerThread` (`EvPrecond`); binder access modelled on Launchpad's `OemVehicleClient`; the ownership journal `files/evprecond.owned` in GPM's data dir; static getters (`navActive()`, `remainingMeters()`, `remainingSeconds()`, `isCharger()`, `chargerKw()`, `state()`/`stateName()`) for the EV logger (`EvDriveLog`; also `chargerDepartureWh()`, `chargerChargeSeconds()`).
 - **Firmware check:** commands are sent only when the SHA-256 of `/system/framework/automotive.odex` and `automotive-service.odex` match our `private/car-neev-260507` copies (and SDK 19), since those files define the transaction numbers. There is no device-name check: the first car test was blocked only by Launchpad's device-name check, which names the 2023 unit (`…neev23_us`), while the owner's 2022 is `…neev_us` with identical framework files.
 
 **Hooks** (`tools/patch_gpm_smali.py`; every call is wrapped in a catch-all, so a Precond failure can't break navigation):
@@ -229,7 +229,7 @@ If anything goes wrong: switch off battery conditioning in the car's EV settings
 ## Open questions
 
 - Manually added charger stops (Test 1 step 4) weren't captured; (a) a charger destination and (b) Maps-planned stops both carry `.2`.
-- Confirm on a real multi-stop drive that the single 0x8007 entry is the next stop (the drive log records `nav_rem_m` alongside the stops).
+- Confirm on a real multi-stop drive that the single 0x8007 entry is the next stop (the EV log records `nav_rem_m` alongside the stops).
 - Exact meaning of station flag 2 / type 3, and whether the BMS uses distance, time or both. Tyler Harvey's Ioniq5_CAN `preconditioning_messages` logs might help.
 - Does Leafia's NAVDUMP pass payloads of any length? Payloads up to 136 bytes arrived intact (Test 1); multi-step routes with lanes will be longer.
 - What "PDK 5.1" corresponds to, and whether 0x8008 is reachable at all.

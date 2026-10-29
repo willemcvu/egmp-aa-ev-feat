@@ -89,6 +89,18 @@ public final class Precond {
         return c == null ? -1 : c.chargerKw();
     }
 
+    /** Maps' planned departure energy at that charging stop, Wh; -1 unknown. */
+    public static int chargerDepartureWh() {
+        PrecondCore c = sCore;
+        return c == null ? -1 : c.chargerDepartureWh();
+    }
+
+    /** Maps' planned charging time at that charging stop, s; -1 unknown. */
+    public static int chargerChargeSeconds() {
+        PrecondCore c = sCore;
+        return c == null ? -1 : c.chargerChargeSeconds();
+    }
+
     // ---- entry points ----------------------------------------------------------
 
     public static void onSessionStart(Context ctx) {

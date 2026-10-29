@@ -31,7 +31,18 @@ failure can never break navigation):
 The preconditioning hooks are not gated by persist.gpm.ev.off. Precond has
 no switch: the car's own battery-conditioning EV setting is its off control.
 
-GalReceiver.smali (which Leafia already patches) is not touched.
+and the always-on EV log (EvDriveLog, docs/LOGGING.md), same catch-all
+wrapping, so a logger failure can never break GPM or Android Auto:
+
+ 10. StartReceiver.onReceive(): EvDriveLog.start() on entry. GPM's boot
+     entry point (BOOT_COMPLETED, USB attach, ...); start() is idempotent.
+ 11. GalReceiverService.onCreate(): EvDriveLog.start() after super.onCreate()
+     (the service StartReceiver starts at boot; covers a process restart).
+ 12. GalReceiverService.onDestroy(): EvDriveLog.flush() on entry (write the
+     buffered rows).
+
+EvDriveLog is not gated by persist.gpm.ev.off (no runtime switches; it only
+reads). GalReceiver.smali (which Leafia already patches) is not touched.
 
 Idempotent: re-running rebuilds the tree from scratch. Fails loudly if any
 anchor is not found exactly once.
@@ -47,6 +58,9 @@ NEW_SMALI = ROOT / "gpm-ev/build/smali"
 BUILD_TREE = ROOT / "build/gpm-smali"
 SENSOR_SOURCE = "com/google/android/projection/protocol/SensorSource.smali"
 NAVI_TBT = "com/google/android/projection/sink/navigation/GpmNaviTBTManager.smali"
+START_RECEIVER = "com/google/android/projection/service/StartReceiver.smali"
+GAL_SERVICE = "com/google/android/projection/service/GalReceiverService.smali"
+EVLOG = "Lcom/google/android/projection/protocol/EvDriveLog;"
 PRECOND = "Lcom/google/android/projection/protocol/Precond;"
 
 MARK = "EV patch"
@@ -203,16 +217,18 @@ SENDRAW_METHOD = """\
 .method public shutdown()V
 """
 
-def guarded_call(label: str, invoke: str) -> str:
+def guarded_call(label: str, invoke: str,
+                 note: str = "automatic preconditioning hook") -> str:
     """A static call wrapped in a catch-all that swallows the exception.
 
     Precond's entry points catch everything themselves; this also covers a
     class that fails to load or verify, so navigation keeps working. Same
     shape d8 emits for `try { f(); } catch (Throwable t) {}`. The handler
-    clobbers v0: every hook point below writes v0 before reading it.
+    clobbers v0: at every hook point below v0 is a scratch register that the
+    method writes before reading (it holds no live value there).
     """
     return f"""\
-    # EV patch: automatic preconditioning hook
+    # EV patch: {note}
     :try_start_{label}
     {invoke}
     :try_end_{label}
@@ -287,9 +303,51 @@ NAVI_EDITS = [
     ("destroy -> precond stop", TBT_DESTROY_OLD, TBT_DESTROY_NEW),
 ]
 
+# --- Always-on EV log -----------------------------------------------------------
+# v0 is unused at these points: onReceive (.registers 10, p0-p2 = v7-v9) and
+# onCreate (.registers 7) first write v0 later; onDestroy (.registers 3)
+# never reads v0 before writing it.
+RECV_OLD = """\
+.method public onReceive(Landroid/content/Context;Landroid/content/Intent;)V
+    .registers 10
+
+"""
+RECV_NEW = RECV_OLD + guarded_call(
+    "evlog_recv", f"invoke-static {{}}, {EVLOG}->start()V",
+    "always-on EV log") + "\n"
+
+GAL_CREATE_OLD = """\
+    const/4 v4, 0x0
+
+    invoke-super {p0}, Lcom/hkmc/app/HKMCService;->onCreate()V
+
+"""
+GAL_CREATE_NEW = GAL_CREATE_OLD + guarded_call(
+    "evlog_create", f"invoke-static {{}}, {EVLOG}->start()V",
+    "always-on EV log") + "\n"
+
+GAL_DESTROY_OLD = """\
+.method public final onDestroy()V
+    .registers 3
+
+"""
+GAL_DESTROY_NEW = GAL_DESTROY_OLD + guarded_call(
+    "evlog_flush", f"invoke-static {{}}, {EVLOG}->flush()V",
+    "always-on EV log") + "\n"
+
+RECV_EDITS = [
+    ("onReceive -> EvDriveLog.start", RECV_OLD, RECV_NEW),
+]
+GAL_EDITS = [
+    ("onCreate -> EvDriveLog.start", GAL_CREATE_OLD, GAL_CREATE_NEW),
+    ("onDestroy -> EvDriveLog.flush", GAL_DESTROY_OLD, GAL_DESTROY_NEW),
+]
+
 FILE_EDITS = [
     (SENSOR_SOURCE, EDITS),
     (NAVI_TBT, NAVI_EDITS),
+    (START_RECEIVER, RECV_EDITS),
+    (GAL_SERVICE, GAL_EDITS),
 ]
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check, clean and merge egmp-aa-ev-feat drive logs (format v1, docs/LOGGING.md).
+"""Check, clean and merge egmp-aa-ev-feat EV logs (formats v1 and v2, docs/LOGGING.md).
 
     python3 tools/evlog.py check FILE...      validate and summarise
     python3 tools/evlog.py clean IN OUT       allowlist filter, deterministic rewrite
@@ -87,8 +87,10 @@ def parse(schema, text):
         text = text[1:]
     lines = [l[:-1] if l.endswith("\r") else l for l in text.split("\n")]
     lines = [l for l in lines if l.strip() != ""]
-    if not lines or lines[0].rstrip() != schema["magic"]:
-        raise LogError("first line is not '%s'" % schema["magic"])
+    accept = schema.get("accept_magic", [schema["magic"]])
+    if not lines or lines[0].rstrip() not in accept:
+        raise LogError("first line is not one of: %s" % ", ".join("'%s'" % m for m in accept))
+    magic = lines[0].rstrip()
     removed = []
     header = {}
     i = 1
@@ -165,11 +167,11 @@ def parse(schema, text):
     for k in ("comment", "malformed", "t_s", "order"):
         if dropped[k]:
             removed.append("%d %s dropped" % (dropped[k], msgs[k]))
-    return {"header": header, "columns": cols, "rows": rows, "removed": removed}
+    return {"magic": magic, "header": header, "columns": cols, "rows": rows, "removed": removed}
 
 
 def serialize(schema, log):
-    out = [schema["magic"]]
+    out = [log.get("magic", schema["magic"])]
     for h in schema["header"]:
         if h["key"] in log["header"]:
             out.append("# %s=%s" % (h["key"], log["header"][h["key"]]))

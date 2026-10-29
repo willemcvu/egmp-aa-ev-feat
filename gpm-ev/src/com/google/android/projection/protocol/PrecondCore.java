@@ -137,6 +137,8 @@ public final class PrecondCore {
     private volatile int pubSeconds = -1;
     private volatile boolean pubIsCharger;
     private volatile int pubKw = -1;
+    private volatile int pubDepWh = -1;
+    private volatile int pubChgS = -1;
 
     public PrecondCore(Vehicle vehicle, Journal journal, Logger logger) {
         this.vehicle = vehicle;
@@ -167,6 +169,16 @@ public final class PrecondCore {
 
     public int chargerKw() {
         return pubKw;
+    }
+
+    /** Maps' planned energy on leaving that charging stop, Wh; -1 unknown. */
+    public int chargerDepartureWh() {
+        return pubDepWh;
+    }
+
+    /** Maps' planned charging time at that stop, s; -1 unknown or none. */
+    public int chargerChargeSeconds() {
+        return pubChgS;
     }
 
     /** Needs periodic tick(): guiding, owning a request or cancelling. */
@@ -628,5 +640,8 @@ public final class PrecondCore {
             pubIsCharger = focus != null && focus.hasStation;
             pubKw = focus != null && focus.hasStation ? focus.maxPowerKw : -1;
         }
+        boolean station = focus != null && focus.hasStation;
+        pubDepWh = station ? focus.departureWh : -1;
+        pubChgS = station ? focus.chargeSeconds : -1;
     }
 }

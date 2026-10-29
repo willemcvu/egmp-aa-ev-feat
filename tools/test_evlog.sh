@@ -25,12 +25,13 @@ $PY - "$VIN" "$ADDR" > "$T/dirty.csv" <<'EOF'
 import sys
 vin, addr = sys.argv[1], sys.argv[2]
 lines = open("site/sample.csv").read().splitlines()
+h = next(i for i, l in enumerate(lines) if not l.startswith("#"))  # column row
 out = [lines[0], "# vin=" + vin, "# vin_model=" + vin, "# dest=" + addr,
-       "# trip to grandma's house"] + [l for l in lines[1:9] if "vin_model" not in l]
-cols = lines[9].split(",")
+       "# trip to grandma's house"] + [l for l in lines[1:h] if "vin_model" not in l]
+cols = lines[h].split(",")
 cols = cols[:3] + ["lat"] + cols[3:] + ["lon"]
 out.append(",".join(cols))
-for i, l in enumerate(lines[10:]):
+for i, l in enumerate(lines[h + 1:]):
     f = l.split(",")
     f = f[:3] + ["43.%04d" % (1000 + i)] + f[3:] + ["-76.%04d" % (2000 + i)]
     if i == 3:
@@ -62,13 +63,25 @@ for bad in "$VIN" "KM8KRDAF5" "vin=" "dest=" "Amphitheatre" "Mountain" "Main St"
            "43.1" "-76.2" "12:34" "$(printf '\r')"; do
   ! grep -qF -- "$bad" "$C" || fail "cleaned file still contains '$bad'"
 done
-head -1 "$C" | grep -qx "# egmp-aa-ev-log v1" || fail "magic line"
+head -1 "$C" | grep -qx "# egmp-aa-ev-log v2" || fail "magic line"
 $PY tools/evlog.py check "$C" > "$T/check3.txt" || fail "cleaned file does not check clean"
 grep -q "(19 rows)" "$T/check3.txt" || { cat "$T/check3.txt"; fail "expected 19 rows after cleaning"; }
 grep -q "vin_model ?" "$T/check3.txt" || fail "full VIN in vin_model should be dropped"
 # cleaning is idempotent
 $PY tools/evlog.py clean "$C" "$T/again.csv" > /dev/null
 cmp -s "$C" "$T/again.csv" || fail "clean is not idempotent"
+
+# 2b. Format v1 files (before always-on logging) still check and clean, and
+#     keep their v1 magic line; a v3 file is not accepted.
+printf '# egmp-aa-ev-log v1\n# date=2026-01-17\n# period_s=5\nt_s,soc_half_pct,speed_kph\n0,160,0\n5,160,29\n' > "$T/v1.csv"
+$PY tools/evlog.py check "$T/v1.csv" > "$T/check_v1.txt" || { cat "$T/check_v1.txt"; fail "v1 file not clean"; }
+$PY tools/evlog.py clean "$T/v1.csv" "$T/v1.clean.csv" > /dev/null
+cmp -s "$T/v1.csv" "$T/v1.clean.csv" || fail "cleaning a clean v1 file changed it"
+sed '1s/v1/v3/' "$T/v1.csv" > "$T/v3.csv"
+set +e
+$PY tools/evlog.py check "$T/v3.csv" > /dev/null; rc=$?
+set -e
+[ "$rc" = 2 ] || fail "unknown format version accepted"
 
 # 3. Unusable files.
 printf 't_s,lat\n1,43.1\n' > "$T/nomagic.csv"
@@ -91,7 +104,7 @@ grep -q "^session1," "$T/merged.csv" || fail "session id for nonstandard name"
 
 # 5. The website's cleaner (site/evlog.js) must give byte-identical output.
 if command -v node > /dev/null 2>&1; then
-  for f in site/sample.csv "$T/dirty.csv"; do
+  for f in site/sample.csv "$T/dirty.csv" "$T/v1.csv"; do
     node -e '
       const fs = require("fs"), E = require(process.argv[1]);
       const s = E.prepareSchema(JSON.parse(fs.readFileSync(process.argv[2], "utf8")));

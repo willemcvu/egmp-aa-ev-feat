@@ -17,7 +17,7 @@ Real EV routing in Google Maps on Android Auto for the Hyundai Ioniq 5's Gen5W h
 - **Cold weather:** live outside temperature raises heating and rolling losses in the model.
 - **Charge times:** calibrated on real DC sessions and the car's own estimate, including the slow last 10–20 %.
 - **Preconditioning:** when the next stop is a charger over 50 kW within an hour, the car is asked to warm the battery. Turn it off with the car's own *battery conditioning* setting.
-- **Drive logs:** copied to any USB drive with an `egmp-aa-ev-logs` folder; check and share them on the [drive log checker](https://willemcvu.github.io/egmp-aa-ev-feat/).
+- **EV logs:** driving and charging, whenever the head unit is on; copied to any USB drive with an `egmp-aa-ev-logs` folder; check and share them on the [EV log checker](https://willemcvu.github.io/egmp-aa-ev-feat/).
 
 ## Install
 
@@ -34,7 +34,7 @@ The release contains no Hyundai or Google files, only small binary deltas that [
 |---|---|
 | [ENERGY-MODEL](docs/ENERGY-MODEL.md) | the energy model and its calibration |
 | [PRECONDITIONING](docs/PRECONDITIONING.md) | how preconditioning works |
-| [LOGGING](docs/LOGGING.md) | drive log format and `tools/evlog.py` |
+| [LOGGING](docs/LOGGING.md) | EV log format and `tools/evlog.py` |
 | [DATA-SOURCES](docs/DATA-SOURCES.md) | vehicle data the head unit exposes |
 | [RESEARCH](docs/RESEARCH.md) | head unit internals and the patch design |
 | [HANDOFF](docs/HANDOFF.md) | developer guide: build, install, troubleshooting |
@@ -48,7 +48,7 @@ The build patches files from your own head unit (not in this repo); see [HANDOFF
 PY=/path/to/python sh tools/build_all.sh   # build everything
 sh gpm-ev/test/run.sh                      # Java host tests
 bash tools/test_package.sh                 # package install/uninstall sandbox
-sh tools/test_evlog.sh                     # drive log tools
+sh tools/test_evlog.sh                     # EV log tools
 sh tools/build_release.sh v0.2.0           # USB release zip
 ```
 

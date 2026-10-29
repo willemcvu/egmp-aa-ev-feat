@@ -1,8 +1,12 @@
 {
   "format": "egmp-aa-ev-log",
-  "version": 1,
-  "magic": "# egmp-aa-ev-log v1",
-  "comment": "Single source of the drive-log allowlist. Read by tools/evlog.py and site/evlog.js. Anything not listed here is dropped by the cleaners. Order here is the cleaned output order (matches the on-car logger's order). Column types: number, int, bool (0/1), string (must have a pattern). Patterns must be valid in both Python re and JavaScript RegExp (keep to anchors, classes and quantifiers).",
+  "version": 2,
+  "magic": "# egmp-aa-ev-log v2",
+  "accept_magic": [
+    "# egmp-aa-ev-log v1",
+    "# egmp-aa-ev-log v2"
+  ],
+  "comment": "Single source of the EV-log allowlist. Read by tools/evlog.py and site/evlog.js. Anything not listed here is dropped by the cleaners. A file must start with one of accept_magic (v2 is a superset of v1); a cleaned file keeps its own magic line. Order here is the cleaned output order (matches the on-car logger's order). Column types: number, int, bool (0/1), string (must have a pattern). Patterns must be valid in both Python re and JavaScript RegExp (keep to anchors, classes and quantifiers).",
   "number_pattern": "^-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?$",
   "header": [
     {
@@ -44,12 +48,17 @@
       "key": "date",
       "type": "string",
       "pattern": "^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$",
-      "desc": "UTC date the session started (no time)"
+      "desc": "UTC date the file started (no time)"
     },
     {
       "key": "period_s",
       "type": "number",
-      "desc": "sample period, s"
+      "desc": "row period, s"
+    },
+    {
+      "key": "sample_s",
+      "type": "number",
+      "desc": "sampling period inside a row (speed avg/max, energy rate), s (v2)"
     }
   ],
   "columns": [
@@ -57,7 +66,7 @@
       "name": "t_s",
       "type": "number",
       "required": true,
-      "desc": "seconds since session start"
+      "desc": "seconds since the file started"
     },
     {
       "name": "soc_half_pct",
@@ -67,17 +76,17 @@
     {
       "name": "energy_wh",
       "type": "number",
-      "desc": "current energy sent to Maps, Wh"
+      "desc": "current energy for the model (BMS available energy, else SOC x capacity), Wh"
     },
     {
       "name": "capacity_wh",
       "type": "number",
-      "desc": "capacity sent to Maps, Wh"
+      "desc": "usable capacity estimate (sent to Maps during Android Auto), Wh"
     },
     {
       "name": "avlbl_enrg_raw",
       "type": "number",
-      "desc": "EV_AVLBL_ENRG from the nav battery packet, raw"
+      "desc": "BMS available energy (HEV 0x31 / nav EV_AVLBL_ENRG), raw, 2 Wh/unit"
     },
     {
       "name": "out_temp_raw",
@@ -102,12 +111,12 @@
     {
       "name": "road_a_n",
       "type": "number",
-      "desc": "road-load A sent to Maps, N"
+      "desc": "road-load A sent to Maps, N (only while Android Auto runs)"
     },
     {
       "name": "aux_table_c",
       "type": "number",
-      "desc": "temperature used for the model table lookup, \u00b0C"
+      "desc": "temperature used for the model table lookup, \u00b0C (only while Android Auto runs)"
     },
     {
       "name": "soh_raw",
@@ -123,12 +132,12 @@
     {
       "name": "speed_kph",
       "type": "number",
-      "desc": "vehicle speed, km/h"
+      "desc": "vehicle speed at the end of the row, km/h"
     },
     {
       "name": "odo_delta_km",
       "type": "number",
-      "desc": "distance since session start, km (never the absolute odometer)"
+      "desc": "distance since the file started, km (never the absolute odometer)"
     },
     {
       "name": "trip_batt_raw",
@@ -211,6 +220,131 @@
       "desc": "battery preconditioning state, raw"
     },
     {
+      "name": "aa_active",
+      "type": "bool",
+      "desc": "an Android Auto session was running (0/1)"
+    },
+    {
+      "name": "energy_rate_w",
+      "type": "number",
+      "desc": "battery power from the change of avlbl_enrg_raw since the previous row, W; + = into the battery (charging), - = discharge. Coarse: average several rows"
+    },
+    {
+      "name": "speed_avg_kph",
+      "type": "number",
+      "desc": "mean of the 1 s speed samples in the row, km/h"
+    },
+    {
+      "name": "speed_max_kph",
+      "type": "number",
+      "desc": "max of the 1 s speed samples in the row, km/h"
+    },
+    {
+      "name": "alt_delta_m",
+      "type": "number",
+      "desc": "GPS altitude change since the file started, m (no position is logged)"
+    },
+    {
+      "name": "drive_mode_raw",
+      "type": "int",
+      "desc": "drive mode (BCM): 0 default, 1 normal, 2 sport, 3 eco, 4 snow"
+    },
+    {
+      "name": "bheat_pwr_raw",
+      "type": "int",
+      "desc": "HEV 0x43 live battery heater power, raw"
+    },
+    {
+      "name": "fast_charging_raw",
+      "type": "int",
+      "desc": "HEV 0x28 FAST_CHARGING, raw"
+    },
+    {
+      "name": "chg_sts_raw",
+      "type": "int",
+      "desc": "HEV 0x1d CHG_STS charging status, raw"
+    },
+    {
+      "name": "chg_quick_rem_min",
+      "type": "int",
+      "desc": "HEV 0x0f car's estimate of DC charging time remaining, min"
+    },
+    {
+      "name": "target_soc_ac_half_pct",
+      "type": "int",
+      "desc": "HEV 0x22 AC charge target, 0.5 % units (200 = 100 %)"
+    },
+    {
+      "name": "target_soc_dc_half_pct",
+      "type": "int",
+      "desc": "HEV 0x23 DC charge target, 0.5 % units"
+    },
+    {
+      "name": "chg_current_raw",
+      "type": "int",
+      "desc": "HEV 0x52 charging current, raw"
+    },
+    {
+      "name": "obc_ac_pwr_raw",
+      "type": "int",
+      "desc": "HEV 0x53 on-board charger AC power, raw"
+    },
+    {
+      "name": "vcms_pwr_raw",
+      "type": "int",
+      "desc": "HEV 0x6c VCMS charging power display, raw (empty when invalid)"
+    },
+    {
+      "name": "clim_set_raw",
+      "type": "number",
+      "desc": "climate driver set temperature in the display unit (clim_unit_raw)"
+    },
+    {
+      "name": "clim_set_c",
+      "type": "number",
+      "desc": "climate driver set temperature, \u00b0C"
+    },
+    {
+      "name": "clim_unit_raw",
+      "type": "int",
+      "desc": "climate temperature unit, raw"
+    },
+    {
+      "name": "clim_blower_raw",
+      "type": "int",
+      "desc": "climate main blower level, raw"
+    },
+    {
+      "name": "clim_mode_raw",
+      "type": "int",
+      "desc": "climate air distribution mode (vent/floor/defrost), raw"
+    },
+    {
+      "name": "clim_ac_raw",
+      "type": "int",
+      "desc": "climate A/C indicator, raw"
+    },
+    {
+      "name": "clim_auto_raw",
+      "type": "int",
+      "desc": "climate AUTO indicator, raw"
+    },
+    {
+      "name": "clim_op_raw",
+      "type": "int",
+      "desc": "climate operating state, raw"
+    },
+    {
+      "name": "nav_charger_dep_wh",
+      "type": "number",
+      "desc": "Maps' planned battery energy on leaving that charging stop, Wh"
+    },
+    {
+      "name": "nav_charger_chg_s",
+      "type": "number",
+      "desc": "Maps' planned charging time at that stop, s"
+    },
+    {
       "name": "pack_max_c",
       "type": "number",
       "desc": "highest battery module temperature, \u00b0C"
@@ -244,19 +378,14 @@
       "name": "charge_kw",
       "type": "number",
       "desc": "charging power, kW"
-    },
-    {
-      "name": "drive_mode_raw",
-      "type": "int",
-      "desc": "drive mode, raw"
     }
   ],
   "never": [
-    "GPS position or any location",
+    "GPS position or any location (only the altitude change since the file started)",
     "addresses, place or road names",
     "the full VIN (check digit, plant and serial number)",
     "phone names or identifiers",
-    "wall-clock times (only the session's UTC date and seconds since start)",
-    "the absolute odometer (only distance since the session started)"
+    "wall-clock times (only the file's UTC date and seconds since it started)",
+    "the absolute odometer (only distance since the file started)"
   ]
 }

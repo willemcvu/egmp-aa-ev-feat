@@ -1,4 +1,4 @@
-/* Drive-log parser/cleaner, format v1 (docs/LOGGING.md).
+/* EV-log parser/cleaner, formats v1 and v2 (docs/LOGGING.md).
  * A line-by-line port of tools/evlog.py: both must produce byte-identical
  * cleaned output (tools/test_evlog.sh compares them when node is available).
  * Works in the browser (window.EvLog) and in node (module.exports). */
@@ -61,8 +61,10 @@
     var lines = text.split("\n").map(function (l) {
       return l.charAt(l.length - 1) === "\r" ? l.slice(0, -1) : l;
     }).filter(function (l) { return l.trim() !== ""; });
-    if (!lines.length || rstrip(lines[0]) !== s.magic)
-      throw new LogError("first line is not '" + s.magic + "'");
+    var accept = s.accept_magic || [s.magic];
+    if (!lines.length || accept.indexOf(rstrip(lines[0])) < 0)
+      throw new LogError("first line is not one of: " + accept.map(function (m) { return "'" + m + "'"; }).join(", "));
+    var magic = rstrip(lines[0]);
     var removed = [], header = {}, i = 1, m;
     while (i < lines.length && lines[i].charAt(0) === "#") {
       var line = lines[i++];
@@ -112,11 +114,11 @@
     ["comment", "malformed", "t_s", "order"].forEach(function (k) {
       if (dropped[k]) removed.push(dropped[k] + " " + msgs[k] + " dropped");
     });
-    return { header: header, columns: cols, rows: rows, removed: removed };
+    return { magic: magic, header: header, columns: cols, rows: rows, removed: removed };
   }
 
   function serialize(s, log) {
-    var out = [s.magic];
+    var out = [log.magic || s.magic];
     s.header.forEach(function (h) {
       if (has(log.header, h.key)) out.push("# " + h.key + "=" + log.header[h.key]);
     });

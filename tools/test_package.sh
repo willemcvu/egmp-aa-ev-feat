@@ -13,7 +13,7 @@
 #   6. upgrade over an earlier build of this package (different GPM APK)
 #   7. refusal when the Leafia snapshot is not intact
 #   8. the package carries only deltas, lpatch and the manifest
-#   9. drive-log offload to an opted-in USB drive
+#   9. EV-log offload to an opted-in USB drive
 #
 # files/lpatch is the real ARM binary; it runs here through qemu binfmt.
 #
@@ -268,7 +268,7 @@ check "files/ holds only deltas, lpatch and MD5SUMS" $?
 ! unzip -l dist/aa.ev.model.zip | grep -E '\.(apk|so|odex|dex)$' >/dev/null
 check "package zip has no APK/so/odex/dex" $?
 
-echo "=== 9. drive-log offload ==="
+echo "=== 9. EV-log offload ==="
 S=$T/s9
 setup_sandbox "$S"
 EV="$S/data/data/com.google.android.projection.sink/files/evlog"
