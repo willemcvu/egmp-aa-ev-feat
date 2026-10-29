@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_ioniq5_model import CAPACITY_WH, charge_table, interp_curve  # noqa
+from build_ioniq5_model import CAPACITY_WH, cumulative_table, interp_curve  # noqa
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -93,7 +93,7 @@ def main():
         cls = charger_class(s["maxkw"])
         model_min = None
         if cls and start_pct >= 0:
-            pts = charge_table(cls)
+            pts = cumulative_table(cls)
             e0 = start_pct / 100 * CAPACITY_WH
             e1 = s["end_pct"] / 100 * CAPACITY_WH
             model_min = (t_at(pts, e1) - t_at(pts, e0)) / 60.0

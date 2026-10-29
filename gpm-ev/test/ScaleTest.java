@@ -9,8 +9,11 @@ import java.util.List;
  * stays at the same SOC. Re-parses the scaled protobuf with a tiny reader
  * (every nested length must add up) and checks the values.
  *
- * Regression: with capacity 62.9 kWh in 1.4 and the tables on the 77.4 kWh
- * axis, Maps showed 28 -> 100% in 16 min on a 180 kW charger (2026-10-29).
+ * Regression (2026-10-29): Maps showed 28 -> 100% in 16 min on a 180 kW
+ * charger. Two causes: the tables were on the 77.4 kWh axis with 62.9 kWh in
+ * 1.4, and 8.1 was emitted as (energy, seconds from empty) while the server
+ * reads (headroom to full, seconds to full), so our fast low-SOC bulk became
+ * the last stretch to 100%. Times here are read the server's way (toFull).
  */
 public final class ScaleTest {
     static final int REF = EvModelTemplate.CAPACITY_WH;
@@ -158,21 +161,29 @@ public final class ScaleTest {
         throw new IllegalStateException("no row " + charger);
     }
 
-    static double secondsAt(List<long[]> pts, double e) {
-        for (int i = 1; i < pts.size(); i++) {
-            long[] a = pts.get(i - 1);
-            long[] b = pts.get(i);
-            if (e <= b[0]) {
-                return a[1] + (b[1] - a[1]) * (e - a[0]) / (double) (b[0] - a[0]);
+    /**
+     * Seconds to full with h Wh of headroom left. 8.1 points are (headroom
+     * to full, seconds to full) in descending headroom, like Ford's DC rows;
+     * (0, 0) is implicit (zero varints aren't encoded).
+     */
+    static double toFull(List<long[]> pts, double h) {
+        long[] b = new long[] {0, 0};
+        for (int i = pts.size() - 1; i >= 0; i--) {
+            long[] a = pts.get(i);
+            if (h <= a[0]) {
+                return b[1] + (a[1] - b[1]) * (h - b[0]) / (double) (a[0] - b[0]);
             }
+            b = a;
         }
-        return pts.get(pts.size() - 1)[1];
+        return pts.get(0)[1];
     }
 
-    /** Minutes from fromPct to toPct of capWh on this row. */
+    /** Minutes from fromPct to toPct of capWh on this row, the way the
+     *  server reads it: T(headroom at from) - T(headroom at to). */
     static double minutes(byte[] msg, long charger, int capWh, double fromPct, double toPct) {
         List<long[]> pts = row(msg, charger);
-        return (secondsAt(pts, capWh * toPct / 100) - secondsAt(pts, capWh * fromPct / 100)) / 60;
+        return (toFull(pts, capWh * (100 - fromPct) / 100)
+                - toFull(pts, capWh * (100 - toPct) / 100)) / 60;
     }
 
     // ---- the checks -------------------------------------------------------------
@@ -216,18 +227,20 @@ public final class ScaleTest {
             boolean timeK = true;
             for (int i = 0; i < p1.size(); i++) {
                 ok &= p1.get(i)[0] <= capWh;
-                if (i > 0) {
-                    mono &= p1.get(i)[0] > p1.get(i - 1)[0] && p1.get(i)[1] > p1.get(i - 1)[1];
+                if (i > 0) {  // descending headroom, descending time to full
+                    mono &= p1.get(i)[0] < p1.get(i - 1)[0] && p1.get(i)[1] < p1.get(i - 1)[1];
                 }
-                // seconds scale by k, except a fixed thermal pause of <= 300 s
+                // every seconds value scales by k (rounding only)
                 double want = p0.get(i)[1] * k;
                 double got = p1.get(i)[1];
-                timeK &= Math.abs(got - want) <= 300 * Math.abs(1 - k) + 1;
+                timeK &= Math.abs(got - want) <= 1;
             }
-            check(ok, "8.1 energy <= capacity" + rc);
-            check(mono, "8.1 monotonic" + rc);
+            check(ok, "8.1 headroom <= capacity" + rc);
+            check(mono, "8.1 monotonic decreasing" + rc);
             check(timeK, "8.1 seconds ~ k x reference" + rc);
-            check(Math.abs(p1.get(p1.size() - 1)[0] - capWh) <= 100, "8.1 ends at capacity" + rc);
+            check(Math.abs(p1.get(0)[0] - capWh) <= 1, "8.1 first headroom = capacity" + rc);
+            long last = p1.get(p1.size() - 1)[0];
+            check(last > 0 && last <= capWh / 100, "8.1 last headroom > 0 and <= 1%" + rc);
         }
     }
 
@@ -248,23 +261,44 @@ public final class ScaleTest {
                 "deterministic");
 
         // 28 -> 100%. Reference-pack physics scaled by k = 0.8127 (same power
-        // at the same SOC): 175 kW 35.04 min x k = 28.47; 200 kW (39.27 - 5.0
-        // pause) x k + 5.0 = 32.85. Was ~17 min with the unscaled tables.
+        // at the same SOC): 175 kW 47.19 min x k = 38.35; 200 kW 46.35 x k =
+        // 37.67. Maps showed 16 min with the old (from-empty, unscaled)
+        // tables; 28.5 / 32.9 with the 2022-23 top end.
         double m175 = minutes(msg, 175000, cap, 28, 100);
         double m200 = minutes(msg, 200000, cap, 28, 100);
         double old175 = minutes(tmpl, 175000, cap, 28, 100);
         double old200 = minutes(tmpl, 200000, cap, 28, 100);
-        System.out.printf("28->100%% at %d Wh: 175 kW %.1f min (was %.1f), 200 kW %.1f min (was %.1f)%n",
+        System.out.printf("28->100%% at %d Wh: 175 kW %.1f min (unscaled %.1f), 200 kW %.1f min (unscaled %.1f)%n",
                 cap, m175, old175, m200, old200);
-        check(Math.abs(m175 - 28.47) < 0.3, "28->100% on 175 kW ~28.5 min, got " + m175);
-        check(Math.abs(m200 - 32.85) < 0.3, "28->100% on 200 kW ~32.9 min, got " + m200);
-        // and the taper: 80 -> 100% (reference 19.8 / 24.8 min)
+        check(Math.abs(m175 - 38.35) < 0.3, "28->100% on 175 kW ~38.4 min, got " + m175);
+        check(Math.abs(m200 - 37.67) < 0.3, "28->100% on 200 kW ~37.7 min, got " + m200);
+        // and the taper: 80 -> 100% (reference 31.9 min on any charger
+        // >= ~60 kW: the taper is below the charger limit)
         double t175 = minutes(msg, 175000, cap, 80, 100);
         double t200 = minutes(msg, 200000, cap, 80, 100);
         System.out.printf("80->100%%: 175 kW %.1f min, 200 kW %.1f min; 10->80%% 350 kW %.1f min%n",
                 t175, t200, minutes(msg, 350000, cap, 10, 80));
-        check(Math.abs(t175 - 16.12) < 0.3, "80->100% on 175 kW ~16.1 min, got " + t175);
-        check(Math.abs(t200 - 21.12) < 0.3, "80->100% on 200 kW ~21.1 min, got " + t200);
+        check(Math.abs(t175 - 25.96) < 0.3, "80->100% on 175 kW ~26.0 min, got " + t175);
+        check(Math.abs(t200 - 25.96) < 0.3, "80->100% on 200 kW ~26.0 min, got " + t200);
+
+        // Top-end anchors: the car's own charge-time estimate on a 350 kW
+        // charger (start 44%: 80% at 21 min, 90% at 29, 100% at 47), owner-
+        // confirmed realistic: 80->90% = 8 min, 90->100% = 18 min at the
+        // learned 62.9 kWh.
+        double a1 = minutes(msg, 350000, cap, 80, 90);
+        double a2 = minutes(msg, 350000, cap, 90, 100);
+        System.out.printf("350 kW: 80->90%% %.2f min, 90->100%% %.2f min, 44->100%% %.2f min%n",
+                a1, a2, minutes(msg, 350000, cap, 44, 100));
+        check(Math.abs(a1 - 8.0) < 0.3, "80->90% on 350 kW ~8 min, got " + a1);
+        check(Math.abs(a2 - 18.0) < 0.3, "90->100% on 350 kW ~18 min, got " + a2);
+        // same top end on a 150 kW charger (the taper is below its limit)
+        double b1 = minutes(msg, 150000, cap, 80, 90);
+        double b2 = minutes(msg, 150000, cap, 90, 100);
+        check(Math.abs(b1 - a1) < 0.1 && Math.abs(b2 - a2) < 0.1,
+                "150 kW top end = 350 kW top end: " + b1 + " / " + b2);
+        // bulk unchanged: 10->80% on 350 kW = 17.43 min reference x k
+        double bulk = minutes(msg, 350000, cap, 10, 80);
+        check(Math.abs(bulk - 14.17) < 0.3, "10->80% on 350 kW ~14.2 min, got " + bulk);
 
         // Supercharger row keeps flat-to-90%: same minutes per SOC% below 90
         double sc1 = minutes(msg, 250000, cap, 10, 50);

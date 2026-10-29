@@ -11,7 +11,8 @@ docs/ENERGY-MODEL.md:
   block 3   drivetrain loss map: spin loss 300 W + 40 W/(m/s) plus 6% of
             wheel power  (~91% battery->wheel at 100 kW, matching Ford's map)
   block 4   max DC charge power vs energy: E-GMP 800 V curve, ~235 kW peak,
-            tapering to ~25 kW at 100%
+            160 kW to 80%, then the voltage taper (~50 kW avg 80-90%, ~22 kW
+            avg 90-100%, the car's own charge-time estimate)
   block 5   battery internal loss: I^2R with R = 0.1 ohm at 650 V
   block 2   + cold: road load A raised at runtime from the live outside temp
             (COLD_DELTA_A, patched by EvModelSender)
@@ -20,7 +21,9 @@ docs/ENERGY-MODEL.md:
             950 W at 45 C
   block 8   charge-time tables per charger power, integrated from block 4
             with AC limits (10.9 kW onboard, 1.44 kW L1); the 250 kW row is
-            Tesla Supercharger (500 V, boost-limited flat 105 kW to 90%)
+            Tesla Supercharger (500 V, boost-limited flat 105 kW to 90%).
+            Each point is (Wh still needed to reach full, seconds to full),
+            descending, like Ford's DC rows - NOT (energy, seconds from empty)
   omitted   1.5, 1.8-1.12, 6, 9, 10 (the Ford sample works without them)
 
 Capacity scaling: blocks 4.1 and 8.1 are defined for the 77.4 kWh reference
@@ -28,8 +31,7 @@ pack, but charging limits follow SOC (BMS taper by cell voltage), not absolute
 energy. The head unit sends the LEARNED usable capacity in 1.4 (~62.9 kWh on
 the owner's car), so it rescales every energy axis (4.1 energy_wh, 8.1
 energy_wh) and every 8.1 seconds value by k = capacity / 77400 at runtime:
-same power at the same SOC, k x the energy per segment. The thermal pause is
-a fixed cooling stop and is not scaled. Without this, "100%" (62.9 kWh) lands
+same power at the same SOC, k x the energy per segment. Without this, "100%" (62.9 kWh) lands
 at ~81% of the reference curve, before the taper, and Maps predicted 28->100%
 in 16 min on a 180 kW charger.
 
@@ -92,36 +94,41 @@ DL_POWERS_W = [-150000, -100000, -50000, -20000,
 DL_SPIN = lambda v: 300 + 40 * v
 DL_FRACTION = 0.06
 
-# Max DC charge power vs absolute battery energy. Full 3C from 0% (no low-SOC
-# ramp-in on a warm pack), plateau to ~50%, thermal step-down to ~160 kW held
-# until the pause. BOTH the step-down and the pause are thermal (heat added
-# THIS session), not absolute SOC: the step lands ~55-60% from a 0% start,
-# ~65-70% from 10%, ~75-80% from 30%. An energy-indexed model can't express
-# that, so the step sits at 53%: calibrated so the canonical road-trip number,
-# 10->80% on a 350 kW charger, is ~17.5 min (owner's logbook; Hyundai's
-# official 18). The pause likewise sits at ~81% (78-85% by start SOC).
+# Max DC charge power vs absolute battery energy (reference pack; the head
+# unit rescales the axis to the learned capacity, so read each point as SOC).
+#
+# Bulk (<=80%), warm/preconditioned pack: full 3C from 0% (no low-SOC ramp-in),
+# plateau to ~50%, thermal step-down to ~160 kW held to 80%. The step-down is
+# thermal (heat added THIS session), not absolute SOC: it lands ~55-60% from a
+# 0% start, ~65-70% from 10%, ~75-80% from 30%. An energy-indexed model can't
+# express that, so the step sits at 53%: calibrated so the canonical
+# road-trip number, 10->80% on a 350 kW charger, is ~17.5 min on the
+# reference pack (owner's logbook; Hyundai's official 18).
+#
+# Top end (>80%): the car's own charge-time estimate, which the owner confirms
+# is realistic for this car: 80->90% = 8 min and 90->100% = 18 min on a
+# 350 kW charger at the learned 62.9 kWh (k = 0.813), i.e. ~50 kW average
+# charger-side over 80-90% and ~22 kW over 90-100%. The voltage taper starts
+# right at 80% and is the same on every charger above ~60 kW. It replaces the
+# earlier 2022-23 fit (150 kW after a 300 s thermal pause at ~81%, 60/35/15 kW
+# at 90/95/100%), which made 90->100% ~12.5 min. The thermal pause is gone:
+# the slow taper covers 80->90% on every charger, and the EA history fits as
+# well or better without it. A slow top is also what makes Maps plan
+# departures well below 100%. Verified against the EA history: see
+# docs/ENERGY-MODEL.md "Field findings".
 CHARGE_CURVE = [
     (0, 230000),       # full send from 0%
     (20000, 235000),   # ~26%: peak
     (38700, 228000),   # 50%: plateau end
     (41022, 160000),   # 53%: thermal step-down (see note above)
-    (61920, 160000),   # 80%: 160 kW holds until the thermal pause (~81%)
-    (63468, 150000),   # 82%: post-pause resume level
-    (69660, 60000),    # 90%
-    (73530, 35000),    # 95%
-    (75800, 22000),    # ~98%
-    (77400, 15000),    # 100%  (95->100% avg ~23 kW, measured)
+    (61920, 160000),   # 80%: end of the bulk; the voltage taper starts here
+    (62694, 70000),    # 81%
+    (65790, 48500),    # 85%
+    (69660, 33500),    # 90%  (80->90% at k = 0.813: 8.0 min)
+    (73530, 25500),    # 95%
+    (75852, 17000),    # 98%
+    (77400, 12000),    # 100% (90->100% at k = 0.813: 18.0 min)
 ]
-
-# Thermal pause: on fast sessions (>=200 kW charger) the car stops charging
-# for 3-6 min when the hottest cell hits ~50-55 C - owner-observed at 78-82%
-# on a warm pack. Placed just past 80% so a stop that ends AT 80% ("leave when
-# the limit hits") doesn't pay for it. Modelled as a flat time insertion in
-# the per-charger time tables only - a power-vs-energy curve cannot express a
-# stop, and slow sessions never trigger it.
-PAUSE_MIN_CHARGER_W = 200000
-PAUSE_AT_WH = 63000        # ~81%
-PAUSE_SECONDS = 300
 
 # Battery internal loss: I^2R, R = 0.1 ohm, ~650 V nominal.
 BL_OHM = 0.1
@@ -173,7 +180,13 @@ SUPERCHARGER_FLAT_TO_WH = 69660  # 90%
 # non-Tesla station near 250 kW isn't matched or interpolated onto it.
 CHARGERS_W = [350000, 260000, SUPERCHARGER_W, 240000, 200000, 175000,
               150000, 125000, 100000, 50000, 25000, 10900, 1440]
-CT_STEP_WH = 3870  # 5% of capacity
+# 8.1 grid: GRID_WH = 0.5% of capacity, each cell integrated in GRID_SLICES
+# midpoint slices (the curve has knees at 53% and 80-81%). Rows list headroom
+# (in grid cells) every 5% from 100% down to 10%, every 1% below that, and a
+# last point at 0.5%: the taper near full is where the time goes.
+GRID_WH = 387
+GRID_SLICES = 4
+HEADROOM_STEPS = list(range(200, 19, -10)) + list(range(18, 1, -2)) + [1]
 
 # The 4.1 curve is charger-side power (what the dash/EA report). The time
 # tables integrate battery-side energy, so scale by the charge efficiency:
@@ -211,34 +224,32 @@ def charger_power(charger_w: int, energy_wh: float) -> float:
     return min(charger_w, interp_curve(energy_wh))
 
 
-def pause_seconds(charger_w: int, energy_wh: int) -> int:
-    """Thermal pause time included in the table point at energy_wh: fast 800 V
-    chargers (>= PAUSE_MIN_CHARGER_W, not the Supercharger row) from the
-    first step at or past PAUSE_AT_WH on."""
-    if (
-        charger_w >= PAUSE_MIN_CHARGER_W
-        and charger_w != SUPERCHARGER_W
-        and energy_wh >= PAUSE_AT_WH
-    ):
-        return PAUSE_SECONDS
-    return 0
+def cumulative_table(charger_w: int) -> list[tuple[int, float]]:
+    """Seconds to charge from empty to each GRID_WH step on this charger
+    (ascending absolute energy, (0, 0) first). Used to build the 8.1 rows and
+    by the analysis/plot tools."""
+    out = [(0, 0.0)]
+    seconds = 0.0
+    de = GRID_WH / GRID_SLICES
+    for i in range(1, CAPACITY_WH // GRID_WH + 1):
+        e0 = (i - 1) * GRID_WH
+        for j in range(GRID_SLICES):
+            # slice midpoint power, charger-side; scale to battery-side energy
+            p = charger_power(charger_w, e0 + (j + 0.5) * de)
+            seconds += 3600.0 * de / (p * CHARGE_ETA)
+        out.append((i * GRID_WH, seconds))
+    return out
 
 
 def charge_table(charger_w: int) -> list[tuple[int, int]]:
-    """Cumulative seconds to reach each energy step on this charger.
-
-    Includes the thermal pause (pause_seconds) as a flat time insertion.
-    """
-    out = [(0, 0)]
-    seconds = 0.0
-    e = CT_STEP_WH
-    while e <= CAPACITY_WH:
-        # segment midpoint power, charger-side; scale to battery-side energy
-        p = charger_power(charger_w, e - CT_STEP_WH / 2) * CHARGE_ETA
-        seconds += 3600.0 * CT_STEP_WH / p
-        out.append((e, round(seconds) + pause_seconds(charger_w, e)))
-        e += CT_STEP_WH
-    return out
+    """The 8.1 row: (headroom Wh still needed to reach full, seconds to full
+    from there), descending headroom like Ford's DC rows, no (0, 0) point
+    (zero varints are not encoded, so they could not be runtime-scaled)."""
+    cum = cumulative_table(charger_w)
+    full = cum[-1][1]
+    n = len(cum) - 1
+    return [(CAPACITY_WH - cum[n - j][0], round(full - cum[n - j][1]))
+            for j in HEADROOM_STEPS]
 
 
 def gen_text() -> str:
@@ -280,8 +291,8 @@ def gen_text() -> str:
     for c in CHARGERS_W:
         a("  by_charger_power {")
         a(f"    charger_power_w: {c}")
-        for e, s in charge_table(c):
-            a(f"    points {{ energy_wh: {e} seconds: {s} }}")
+        for h, t in charge_table(c):
+            a(f"    points {{ energy_wh: {h} seconds: {t} }}")
         a("  }")
     a("}")
     return "\n".join(L) + "\n"
@@ -330,8 +341,8 @@ def widen_runtime_fields(model: bytearray) -> tuple[int, int]:
 _SCALE_MSGS = {(4,), (4, 1), (8,), (8, 1), (8, 1, 2)}
 _SCALE_VARINTS = {
     (4, 1, 1): "axis",      # charge_limits.max_charge_power.energy_wh
-    (8, 1, 2, 1): "axis",   # charge_time.by_charger_power.points.energy_wh
-    (8, 1, 2, 2): "time",   # charge_time.by_charger_power.points.seconds
+    (8, 1, 2, 1): "axis",   # charge_time...points.energy_wh (headroom to full)
+    (8, 1, 2, 2): "time",   # charge_time...points.seconds (time to full)
 }
 
 
@@ -390,12 +401,6 @@ def widen_scaled_fields(model: bytearray) -> tuple[bytearray, list, list]:
     kmax = SCALE_MAX_CAPACITY_WH / CAPACITY_WH
     assert max(want_axis + want_time) * kmax < limit, "SCALE_WIDTH too small"
     return new, axis, times
-
-
-def time_fixed_seconds() -> list[int]:
-    """Per 8.1 point, the part of its seconds that is NOT capacity-scaled
-    (the thermal pause), in wire order."""
-    return [pause_seconds(c, e) for c in CHARGERS_W for e, _ in charge_table(c)]
 
 
 def protoc_decode(model: bytes) -> str:
@@ -499,9 +504,6 @@ def main() -> int:
                     "8.1 seconds varints (SCALE_WIDTH bytes)")
         + java_ints("TIME_S", [v for _, v in time_marks],
                     "their values for the reference pack")
-        + java_ints("TIME_FIXED_S", time_fixed_seconds(),
-                    "part of TIME_S not scaled (thermal pause): "
-                    "(TIME_S - fixed) x k + fixed")
     )
     model_rev = hashlib.sha1(batch).hexdigest()[:8]
     cold_t = ", ".join(f"{t}f" for t, _ in COLD_DELTA_A)

@@ -760,8 +760,7 @@ public final class EvModelSender {
      * multiplied by k = capWh / CAPACITY_WH. Charging limits follow SOC (the
      * BMS tapers by cell voltage), so a smaller usable pack reaches the same
      * taper at the same SOC: same power, k x the energy per segment, k x the
-     * time. The thermal pause (TIME_FIXED_S) is a cooling stop and not
-     * scaled. Powers are untouched. Identity at k = 1.
+     * time. Powers are untouched. Identity at k = 1.
      */
     static byte[] scaleTemplate(byte[] template, int capWh) {
         byte[] out = (byte[]) template.clone();
@@ -779,9 +778,8 @@ public final class EvModelSender {
         }
         offs = EvModelTemplate.TIME_OFFSETS;
         int[] s = EvModelTemplate.TIME_S;
-        int[] fixed = EvModelTemplate.TIME_FIXED_S;
         for (int i = 0; i < offs.length; i++) {
-            long v = ((s[i] - fixed[i]) * (long) capWh + ref / 2) / ref + fixed[i];
+            long v = (s[i] * (long) capWh + ref / 2) / ref;
             writeFixedVarint(out, offs[i], (int) Math.min(v, max), width);
         }
         return out;
@@ -830,8 +828,7 @@ public final class EvModelSender {
                 }
             }
             offs = EvModelTemplate.TIME_OFFSETS;
-            if (offs.length != EvModelTemplate.TIME_S.length
-                    || offs.length != EvModelTemplate.TIME_FIXED_S.length) {
+            if (offs.length != EvModelTemplate.TIME_S.length) {
                 return false;
             }
             for (int i = 0; i < offs.length; i++) {
