@@ -56,7 +56,7 @@ elif [ "$_live_lib" = "$SUM_PAY_LIB" ] && [ "$_live_apk" != "$SUM_BASE_APK" ]; t
     fi
 else
     log "FAIL: live files are neither Leafia v1.0.5 nor this package's - refusing"
-    toast "AA EV model not installed: needs HMG Leafia Plus v1.0.5 on $CAR_NAME 260507 firmware. Nothing was changed."
+    toast "AA EV model not installed: needs HMG Leafia Plus v1.0.5 on $CAR_NAME $CAR_FW firmware. Nothing was changed."
     exit 1
 fi
 

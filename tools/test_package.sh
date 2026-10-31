@@ -26,13 +26,14 @@ T=/tmp/opencode/pkgtest
 rm -rf "$T"
 mkdir -p "$T"
 
-# CAR=neev|ev6 (tools/cars.sh); default: the first car with inputs.
+# CAR=neev|neev23_260903|ev6 (tools/cars.sh); default: the first car with inputs.
 . tools/cars.sh
 CAR="${CAR:-$(set -- $(cars_present); echo "$1")}"
 car_inputs "$CAR" || exit 1
 PRIV=$LEAFIA_DIR
 case "$CAR" in
     neev) PRODUCT=NEEV.USA.0000.V015.012.260507 ;;
+    neev23_260903) PRODUCT=NEEV23.USA.0000.V016.010.260903 ;;
     ev6)  PRODUCT=CVEV.USA.0000.V015.012.260507 ;;
 esac
 SUM_BASE_APK=$(md5sum "$PRIV/HKMC_GPM.apk" | cut -d' ' -f1)
@@ -164,7 +165,8 @@ EOF
 run_script() {
     local S="$1" script="$2"
     # NEMESIS runs package hooks with cwd inside the (staging) package tree.
-    ( cd "$S/data/nemesis/apps/aa.ev.model" && \
+    # unset CAR: the scripts must find the car from its product id, as on the unit
+    ( unset CAR; cd "$S/data/nemesis/apps/aa.ev.model" && \
         PM_LOG="$S/pm.log" REBOOT_LOG="$S/reboot.log" \
         PATH="$S/system/xbin:$S/system/bin:$S/data/nemesis/bin:$PATH" \
         /bin/bash "scripts/$script" 2>&1 )
@@ -306,6 +308,15 @@ run_script "$S" pre.sh > "$T/s7b.pre.log" 2>&1
 check "pre.sh refuses another car's product id" $?
 [ "$(md5_of "$S/system/app/HKMC_GPM.apk")" = "$SUM_BASE_APK" ]
 check "live APK untouched" $?
+
+if [ "$CAR" = neev23_260903 ]; then
+    echo "=== 7c. the SE product id is the same car ==="
+    S=$T/s7c
+    setup_sandbox "$S"
+    sed -i "s|$PRODUCT|NEEV23SE.USA.0000.V016.010.260903|" "$S/system/bin/getprop"
+    run_script "$S" pre.sh > "$T/s7c.pre.log" 2>&1
+    check "pre.sh accepts NEEV23SE on 260903" $?
+fi
 
 echo "=== 8. package contents ==="
 _cars=$(cd packages/aa-ev-model/files && LC_ALL=C ls -d */ 2>/dev/null | tr -d / | tr '\n' ' ')

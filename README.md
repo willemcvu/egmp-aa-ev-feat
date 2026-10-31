@@ -7,7 +7,8 @@ Real EV routing in Google Maps on Android Auto for the Gen5W head unit in the Hy
 
 ## Requirements
 
-- Hyundai Ioniq 5 (US), Gen5W software `NEEV.USA.0000.V015.012.260507`, or Kia EV6 (US), `CVEV.USA.0000.V015.012.260507`
+- Hyundai Ioniq 5 (US), Gen5W software `NEEV.USA.0000.V015.012.260507` or `NEEV23.USA.0000.V016.010.260903`, or Kia EV6 (US), `CVEV.USA.0000.V015.012.260507`
+- On 260903, Leafia from the Ioniq 5 US 260903 port (VysseCodes/HMG-Leafia-Plus#179). The installer refuses other builds.
 - [NEMESIS](https://github.com/xwtk/hmg_nemesis) installed
 - **[HMG Leafia Plus](https://github.com/VysseCodes/HMG-Leafia-Plus) v1.0.5 installed first.** This package builds on Leafia's modified Android Auto files; without exactly v1.0.5 the installer refuses and changes nothing.
 

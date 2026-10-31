@@ -7,6 +7,9 @@ car_inputs() {
         neev)
             LEAFIA_DIR=private/car-current-leafia105
             STOCK_APK=private/car-neev-260507/LEAFIA/private/stock/app/HKMC_GPM.apk ;;
+        neev23_260903)
+            LEAFIA_DIR=private/neev23_260903/leafia105
+            STOCK_APK=private/neev23_260903/stock/HKMC_GPM.apk ;;
         ev6)
             LEAFIA_DIR=private/ev6/leafia105
             STOCK_APK=private/ev6/stock/HKMC_GPM.apk ;;
@@ -19,7 +22,7 @@ car_inputs() {
 # cars_present: the cars whose inputs exist
 cars_present() {
     local _c _out=""
-    for _c in neev ev6; do
+    for _c in neev neev23_260903 ev6; do
         car_inputs "$_c"
         [ -s "$LEAFIA_DIR/HKMC_GPM.apk" ] && [ -s "$STOCK_APK" ] && _out="$_out $_c"
     done

@@ -346,13 +346,16 @@ public final class Precond {
         // only sent when the framework is byte-for-byte one they were
         // verified on. No device-name check: identical framework files mean
         // identical numbers. {automotive.odex, automotive-service.odex}:
-        // Ioniq 5 US 260507 (gen5w-preconditioning's profile), and Kia EV6
-        // US 260507 (checked call by call, docs/PRECONDITIONING.md).
+        // Ioniq 5 US 260507 (gen5w-preconditioning's profile), Kia EV6 US
+        // 260507, and Ioniq 5 NEEV23 US 260903 (each checked call by call,
+        // docs/PRECONDITIONING.md).
         static final String[][] VERIFIED_FRAMEWORKS = {
             {"dd72e04bce0a2b4bda1506308ac21f91002c1436553b8156c345cc4313661338",
              "3cf40fb00854c63afa49abea1dad18a0afcbc0dd68b17de9ed7ea3f5aeab4222"},
             {"b9e7e02b81e1a8cfcf767c6b8bbb28bcf1d2c411a208fbf6a465e7f0c662774a",
              "8af745b41aa28f490953d61531215cd94e059f104b31f6236a8f6c7af23b8062"},
+            {"c52e0825956880d627b32979022705a618200f059476c094d729133d1ff6a3be",
+             "bf17e682d1beb349ae8ef2acaae6d6e908fe42e88853d7145ee16b29bb4d9ec1"},
         };
 
         private Boolean compatible;  // null = not checked yet

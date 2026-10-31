@@ -10,7 +10,7 @@ echo "live receiver lib:    $(file_md5 $LIB_LIVE)"
 echo "base   (Leafia 1.0.5): apk $SUM_BASE_APK"
 echo "                     : odex $SUM_BASE_ODEX"
 echo "                     : lib $SUM_BASE_LIB"
-echo "car: ${CAR_NAME:-unsupported} ($CAR)"
+echo "car: ${CAR_NAME:-unsupported} ${CAR_FW} ($CAR)"
 if [ -f "$FILES_CAR/MD5SUMS" ]; then
     echo "payload:"
     cat "$FILES_CAR/MD5SUMS"
