@@ -8,7 +8,7 @@ The delta stores the md5 of the source and of the target. On the head unit,
 writes it if the result matches. Needs: pip install --require-hashes -r tools/requirements.txt
 """
 import hashlib, struct, sys, zlib
-import bsdiff4.core
+import bsdiff4.core, bsdiff4.format
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] in ('-h', '--help'):
@@ -19,6 +19,8 @@ def main():
     src, tgt, out = sys.argv[1:4]
     a, b = open(src, 'rb').read(), open(tgt, 'rb').read()
     ctrl, diff, extra = bsdiff4.core.diff(a, b)
+    if isinstance(ctrl, bytes):  # bsdiff4 1.4.1 returns the control block packed
+        ctrl = list(bsdiff4.format.unpack_control_block(ctrl))
     body = struct.pack('<I', len(ctrl))
     for x, y, z in ctrl:
         if not (0 <= x < 2**31 and 0 <= y < 2**31 and -2**31 <= z < 2**31):

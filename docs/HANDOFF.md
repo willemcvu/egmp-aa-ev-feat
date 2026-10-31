@@ -48,6 +48,9 @@ The build patches files pulled from your own head unit. Put them in `private/` (
 
 - `private/car-current-leafia105/`: `HKMC_GPM.apk`, `HKMC_GPM.odex`, `libautoreceiver_infobank.so` from a unit with Leafia v1.0.5, and `smali-gpm/` (baksmali of that APK's `classes.dex`)
 - `private/car-neev-260507/LEAFIA/private/stock/app/HKMC_GPM.apk`: the stock GPM APK (Leafia's backup)
+- Kia EV6: the same files in `private/ev6/leafia105/` and `private/ev6/stock/HKMC_GPM.apk`
+
+`tools/cars.sh` lists each car's inputs. `build_all.sh` builds every car whose inputs are present (or `CARS="neev ev6"`), and the package carries one `files/<car>/` per car, picked on the unit from `ro.build.product`. `tools/test_package.sh` tests one car (`CAR=neev` or `CAR=ev6`).
 
 Tools: Android SDK build-tools + `platforms/android-19`, smali/baksmali 2.5.2, Python with `capstone` and `bsdiff4`, `protoc`, `zip`, and `qemu-arm-static` (runs the ARM `lpatch` on the host).
 

@@ -48,14 +48,16 @@ Idempotent: re-running rebuilds the tree from scratch. Fails loudly if any
 anchor is not found exactly once.
 """
 
+import os
 import shutil
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC_TREE = ROOT / "private/car-current-leafia105/smali-gpm"
+# GPM_SMALI_SRC / GPM_SMALI_OUT: another car's tree (tools/build_all.sh)
+SRC_TREE = Path(os.environ.get("GPM_SMALI_SRC", ROOT / "private/car-current-leafia105/smali-gpm"))
 NEW_SMALI = ROOT / "gpm-ev/build/smali"
-BUILD_TREE = ROOT / "build/gpm-smali"
+BUILD_TREE = Path(os.environ.get("GPM_SMALI_OUT", ROOT / "build/gpm-smali"))
 SENSOR_SOURCE = "com/google/android/projection/protocol/SensorSource.smali"
 NAVI_TBT = "com/google/android/projection/sink/navigation/GpmNaviTBTManager.smali"
 START_RECEIVER = "com/google/android/projection/service/StartReceiver.smali"

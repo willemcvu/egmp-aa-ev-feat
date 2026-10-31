@@ -31,11 +31,43 @@ GPM_APK=$APP_DIR/HKMC_GPM.apk
 GPM_ODEX=$APP_DIR/HKMC_GPM.odex
 LIB_LIVE=/system/lib/libautoreceiver_infobank.so
 
-# Live files must match these (Leafia v1.0.5 on NEEV.USA 260507) unless this
-# package's own payload is already in place.
-SUM_BASE_APK=0308224b94c7e1b81d372a8ea1535aed
-SUM_BASE_ODEX=7d81a60aabf89efdd4ce12ba9787248e
-SUM_BASE_LIB=c08410a8d32a615b1aa805cd8a243d52
+# The car, from its product id (prefixes as in Leafia's patches/cars).
+# Its deltas and manifest are in $FILES/<car>/; lpatch is in $FILES.
+car_id() {
+    case "$(getprop ro.build.product 2>/dev/null)" in
+        CVEV.USA.*) echo ev6 ;;
+        NEEV23.USA.0000.V016.010.260903|NEEV23SE.USA.0000.V016.010.260903) echo neev23_260903 ;;
+        NEEV.USA.*|NEEV23.USA.*) echo neev ;;
+    esac
+}
+CAR=${CAR:-$(car_id)}
+FILES_CAR=$FILES/$CAR
+
+# Live files must match these (Leafia v1.0.5 on that car's firmware)
+# unless this package's own payload is already in place.
+case "$CAR" in
+    neev)
+        CAR_NAME="Ioniq 5 (US)"
+        CAR_FW=260507
+        SUM_BASE_APK=0308224b94c7e1b81d372a8ea1535aed
+        SUM_BASE_ODEX=7d81a60aabf89efdd4ce12ba9787248e ;;
+    neev23_260903)
+        CAR_NAME="Ioniq 5 (US)"
+        CAR_FW=260903
+        SUM_BASE_APK=7f69ea05602f6ab9d5ce4da432e2a1d1
+        SUM_BASE_ODEX=eb3e859d01805b75c5a3286443a49a80 ;;
+    ev6)
+        CAR_NAME="EV6 (US)"
+        CAR_FW=260507
+        SUM_BASE_APK=7c6df0f570677157326b105b6b87bfc2
+        SUM_BASE_ODEX=72bdd360c5cacb968f2f28409e6ef859 ;;
+    *)
+        CAR_NAME=""
+        CAR_FW=""
+        SUM_BASE_APK=none
+        SUM_BASE_ODEX=none ;;
+esac
+SUM_BASE_LIB=c08410a8d32a615b1aa805cd8a243d52   # same Leafia library on every car
 
 GPM_PKG=com.google.android.projection.sink
 
@@ -92,7 +124,7 @@ sum_is() {
 manifest_sum() {
     local _name="$1"
     local _line
-    _line=$(grep "  $_name\$" "$FILES/MD5SUMS" 2>/dev/null) || return 1
+    _line=$(grep "  $_name\$" "$FILES_CAR/MD5SUMS" 2>/dev/null) || return 1
     set -- $_line
     [ -n "$1" ] || return 1
     echo "$1"
@@ -148,7 +180,7 @@ build_payloads() {
             *.apk) _src="$1" ;;
             *) _src="$2" ;;
         esac
-        if ! "$FILES/lpatch" delta "$FILES/$_n.lpd" "$_src" "$PAYLOAD/$_n" >> "$LOG" 2>&1; then
+        if ! "$FILES/lpatch" delta "$FILES_CAR/$_n.lpd" "$_src" "$PAYLOAD/$_n" >> "$LOG" 2>&1; then
             log "FAIL: could not rebuild $_n from $_src"
             return 1
         fi

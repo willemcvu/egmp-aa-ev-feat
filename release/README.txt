@@ -21,6 +21,8 @@ your own risk.
 
 REQUIREMENTS (the installer refuses anything else and changes nothing)
 - Hyundai Ioniq 5 (US), Gen5W head unit, software NEEV.USA.0000.V015.012.260507
+  or NEEV23.USA.0000.V016.010.260903 (Leafia from the 260903 port,
+  HMG-Leafia-Plus PR 179), or Kia EV6 (US), software CVEV.USA.0000.V015.012.260507
 - NEMESIS installed (https://github.com/xwtk/hmg_nemesis)
 - HMG Leafia Plus v1.0.5 installed (https://github.com/VysseCodes/HMG-Leafia-Plus)
 
