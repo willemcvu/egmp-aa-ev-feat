@@ -1,0 +1,15 @@
+# Cars the aa.ev.model package can be built for: one line per HMG Leafia Plus
+# v1.0.5 patch set (Leafia's patches/cars and patches/<set>/manifest).
+#
+# <car> <Leafia GPM APK md5> <Leafia GPM odex md5 or -> <Leafia AA library md5> <name>
+#
+# The APK and library md5s are the results in Leafia's manifest, so a build
+# refuses files pulled from anything else. The odex is made on the car by
+# dexopt when Leafia installs; "-" means it is not known yet and is taken
+# from the pulled file (tools/pull_car_files.sh), then checked on every car
+# at install time like the others.
+#
+# A car is built when private/<car>/ holds its files (see docs/PORTING.md).
+neev   0308224b94c7e1b81d372a8ea1535aed 7d81a60aabf89efdd4ce12ba9787248e c08410a8d32a615b1aa805cd8a243d52 Hyundai Ioniq 5 (US) 260507
+ev6    7c6df0f570677157326b105b6b87bfc2 - c08410a8d32a615b1aa805cd8a243d52 Kia EV6 (US) 260507
+ev6_ca 1929356d4d7126b28ffd3a6f13392fcf - c08410a8d32a615b1aa805cd8a243d52 Kia EV6 (Canada) 260206

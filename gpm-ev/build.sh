@@ -1,5 +1,5 @@
 #!/bin/sh
-# Compile the EvModelSender/EvModelTemplate, EV log (EvDriveLog, EvLogger,
+# Compile the EvModelSender/EvModelTemplate, EvVehicle, EvFirmware, EV log (EvDriveLog, EvLogger,
 # EvRowAgg, EvCar) and preconditioning (NavProto,
 # PrecondCore, Precond) Java sources to smali in
 # gpm-ev/build/smali, ready for tools/patch_gpm_smali.py.
@@ -18,13 +18,16 @@ javac -source 8 -target 8 \
     src/$PKG/EvModelSender.java src/$PKG/EvModelTemplate.java src/$PKG/EvLogger.java \
     src/$PKG/EvCar.java src/$PKG/EvDriveLog.java src/$PKG/EvRowAgg.java \
     src/$PKG/NavProto.java src/$PKG/PrecondCore.java src/$PKG/Precond.java \
+    src/$PKG/EvFirmware.java src/$PKG/EvVehicle.java \
     stubs/$PKG/SensorSource.java \
     stubs/com/hkmc/cluster/NavigationCluster.java \
     stubs/com/hkmc/cluster/NavigationClusterListener.java
 
 # Dex only our classes, never the stubs (the real ones are in the GPM tree /
 # the car's automotive.jar).
-"$ANDROID_HOME/build-tools/34.0.0/d8" --min-api 19 --output build/dex \
+D8="$ANDROID_HOME/build-tools/34.0.0/d8"
+[ -x "$D8" ] || D8="$D8.bat"   # Windows SDK
+"$D8" --min-api 19 --output build/dex \
     build/classes/$PKG/EvModelSender*.class \
     "build/classes/$PKG/EvModelTemplate.class" \
     build/classes/$PKG/EvLogger*.class \
@@ -32,9 +35,11 @@ javac -source 8 -target 8 \
     build/classes/$PKG/EvDriveLog*.class \
     build/classes/$PKG/EvRowAgg*.class \
     build/classes/$PKG/NavProto*.class \
-    build/classes/$PKG/Precond*.class
+    build/classes/$PKG/Precond*.class \
+    build/classes/$PKG/EvFirmware*.class \
+    build/classes/$PKG/EvVehicle*.class
 
-baksmali d build/dex/classes.dex -o build/smali
+${BAKSMALI:-baksmali} d build/dex/classes.dex -o build/smali
 
 # Every compiled class except the stubs must be in the dex: a class left
 # out of the d8 list above only fails on the car (NoClassDefFoundError).

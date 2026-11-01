@@ -7,15 +7,22 @@ echo "off switch ($OFF_PROP): $(getprop $OFF_PROP)"
 echo "live HKMC_GPM.apk:    $(file_md5 $GPM_APK)"
 echo "live HKMC_GPM.odex:   $(file_md5 $GPM_ODEX)"
 echo "live receiver lib:    $(file_md5 $LIB_LIVE)"
-echo "base   (Leafia 1.0.5): apk $SUM_BASE_APK"
-echo "                     : odex $SUM_BASE_ODEX"
-echo "                     : lib $SUM_BASE_LIB"
-if [ -f "$FILES/MD5SUMS" ]; then
-    echo "payload:"
-    cat "$FILES/MD5SUMS"
-fi
+for _c in $(cars); do
+    use_car "$_c" || continue
+    echo "car $_c: $CAR_NAME"
+    echo "  base (Leafia 1.0.5): apk $SUM_BASE_APK"
+    echo "                     : odex $SUM_BASE_ODEX"
+    echo "                     : lib $SUM_BASE_LIB"
+    echo "  payload:"
+    cat "$FILES/$_c/MD5SUMS"
+done
 if [ -d "$BACKUP_DIR" ]; then
-    echo "snapshot: present in $BACKUP_DIR"
+    if _c=$(snapshot_car); then
+        use_car "$_c"
+        echo "snapshot: present in $BACKUP_DIR ($CAR_NAME)"
+    else
+        echo "snapshot: present in $BACKUP_DIR (not a supported car's Leafia files)"
+    fi
 else
     echo "snapshot: none"
 fi

@@ -31,6 +31,10 @@ The model assumed the new-car 77.4 kWh. At ~105k miles the real usable capacity 
 
 Use the EV logs (item 2) to correct the model on the car: compare predicted and actual energy use per drive and adjust road load / aux power, so the model follows the actual car, season and tyres without manual recalibration. Start offline (the analysis tool refits the tables from submitted logs), then consider a slow on-car correction with tight bounds.
 
+## 5. Other cars (in progress, fork adman234/egmp-aa-ev-feat)
+
+Kia EV6 (US, 260507) first, then any car Leafia supports. The code, installer and tests are multi-car (2026-11-01); the EV6 build waits on one owner's files from the car (`tools/car-kit/`), then an on-car test. Details and status: [PORTING.md](PORTING.md).
+
 ## To verify (existing features)
 
 - Supercharger charge times: does Maps use the 250 kW table row for Tesla stations?

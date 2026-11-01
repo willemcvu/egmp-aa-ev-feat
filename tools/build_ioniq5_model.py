@@ -449,7 +449,7 @@ def main() -> int:
     import base64
 
     text = gen_text()
-    OUT_TXT.write_text(text)
+    OUT_TXT.write_text(text, newline="\n")
     r = subprocess.run(
         ["protoc", "-I", str(PROTO.parent), "--encode=vem.VehicleEnergyModel", PROTO.name],
         input=text.encode(),
@@ -478,6 +478,15 @@ def main() -> int:
     assert af[1].wire == 5 and af[1].val_len == 4
     a_off_in_model = af[1].val_off
     assert struct.unpack("<f", model[a_off_in_model:a_off_in_model + 4])[0] == ROAD_LOAD[0]
+    # road_load.c_n_per_mps2.value (2.3.1, float) - per-vehicle patch point
+    # (EvVehicle). B stays 0 for every vehicle: proto3 leaves a zero float
+    # out, so B has no patch point and other cars use A + C*v^2 fits too.
+    assert ROAD_LOAD[1] == 0.0
+    cf = parse_fields(model, rf[3].val_off, rf[3].val_off + rf[3].val_len)
+    assert cf[1].wire == 5 and cf[1].val_len == 4
+    c_off_in_model = cf[1].val_off
+    assert (struct.unpack("<f", model[c_off_in_model:c_off_in_model + 4])[0]
+            == struct.unpack("<f", struct.pack("<f", ROAD_LOAD[2]))[0])
 
     batch = (
         b"\x80\x03"
@@ -490,10 +499,11 @@ def main() -> int:
     cap_off += hdr
     temp_off = temp_off_in_model + hdr
     a_off = a_off_in_model + hdr
+    c_off = c_off_in_model + hdr
     print(f"model {len(model)} bytes, batch {len(batch)} bytes "
           f"(model {size_battery_only} before widening the 4.1/8.1 varints); "
           f"offsets: energy@{energy_off} capacity@{cap_off} temp@{temp_off} "
-          f"roadA@{a_off}; {len(axis_marks)} energy-axis + {len(time_marks)} "
+          f"roadA@{a_off} roadC@{c_off}; {len(axis_marks)} energy-axis + {len(time_marks)} "
           f"seconds varints scaled at runtime")
     scale_java = (
         java_ints("AXIS_OFFSETS", [o + hdr for o, _ in axis_marks],
@@ -532,6 +542,8 @@ def main() -> int:
         "    static final String MODEL_REV = \"%s\";  // sha1 of the batch, short\n"
         "    static final int ROAD_A_OFFSET = %d;  // road_load.a_n float bits\n"
         "    static final float ROAD_A_N = %rf;\n"
+        "    static final int ROAD_C_OFFSET = %d;  // road_load.c_n_per_mps2 float bits\n"
+        "    static final float ROAD_C_N = %rf;\n"
         "    // extra road load A vs outside temp (C), linear between, clamped\n"
         "    static final float[] COLD_TEMPS_C = {%s};\n"
         "    static final float[] COLD_DELTA_A_N = {%s};\n"
@@ -546,8 +558,10 @@ def main() -> int:
         "    private EvModelTemplate() {}\n"
         "}\n"
         % (CAPACITY_WH, cap_off, CAPACITY_WIDTH, energy_off, ENERGY_WIDTH,
-           PLACEHOLDER_WH, temp_off, model_rev, a_off, ROAD_LOAD[0], cold_t, cold_a,
-           SCALE_WIDTH, scale_java, lines[0], concat)
+           PLACEHOLDER_WH, temp_off, model_rev, a_off, ROAD_LOAD[0], c_off,
+           ROAD_LOAD[2], cold_t, cold_a,
+           SCALE_WIDTH, scale_java, lines[0], concat),
+        newline="\n",  # LF on Windows too
     )
     print(f"wrote {OUT_TXT.relative_to(ROOT)}, {OUT_MODEL.relative_to(ROOT)}, "
           f"{OUT_BATCH.relative_to(ROOT)}, {OUT_JAVA.relative_to(ROOT)}")
