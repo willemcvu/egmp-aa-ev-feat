@@ -1,0 +1,4 @@
+[nemesis]
+version=1.0
+type=execute
+path=egmp-car-files.sh

@@ -9,9 +9,6 @@ if [ ! -d "$BACKUP_DIR" ]; then
     exit 0
 fi
 
-SUM_PAY_APK=$(manifest_sum HKMC_GPM.apk)
-SUM_PAY_LIB=$(manifest_sum libautoreceiver_infobank.so)
-
 apps_hold
 if ! sys_rw; then
     log "FAIL: remount /system rw"
@@ -22,11 +19,14 @@ fi
 # was uninstalled in between, the live files are stock: leave them alone.
 # The GPM APK also counts as ours when our library is in place and the APK
 # isn't Leafia's: an earlier build of this package (its APK md5 differs).
+# "Ours" and "Leafia's" cover every supported car's files.
 _rc=0
 _live_apk=$(file_md5 "$GPM_APK")
 _live_lib=$(file_md5 "$LIB_LIVE")
-if [ "$_live_apk" = "$SUM_PAY_APK" ] ||
-   { [ "$_live_lib" = "$SUM_PAY_LIB" ] && [ "$_live_apk" != "$SUM_BASE_APK" ]; }; then
+_ours_lib=0
+any_sum MD5SUMS libautoreceiver_infobank.so "$_live_lib" && _ours_lib=1
+if any_sum MD5SUMS HKMC_GPM.apk "$_live_apk" ||
+   { [ "$_ours_lib" = 1 ] && ! any_sum BASE HKMC_GPM.apk "$_live_apk"; }; then
     if [ -s "$BACKUP_DIR/HKMC_GPM.apk" ] && [ -s "$BACKUP_DIR/HKMC_GPM.odex" ]; then
         put_lib "$BACKUP_DIR/HKMC_GPM.apk" "$GPM_APK" || _rc=1
         put_lib "$BACKUP_DIR/HKMC_GPM.odex" "$GPM_ODEX" || _rc=1
@@ -39,7 +39,7 @@ else
     log "live HKMC_GPM.apk is not this package's - leaving it alone"
 fi
 
-if [ "$_live_lib" = "$SUM_PAY_LIB" ]; then
+if [ "$_ours_lib" = 1 ]; then
     if [ -s "$BACKUP_DIR/libautoreceiver_infobank.so" ]; then
         put_lib "$BACKUP_DIR/libautoreceiver_infobank.so" "$LIB_LIVE" || _rc=1
         log "restored libautoreceiver_infobank.so"

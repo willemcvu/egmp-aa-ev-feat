@@ -1,6 +1,9 @@
 # egmp-aa-ev-feat
 
-Real EV routing in Google Maps on Android Auto for the Hyundai Ioniq 5's Gen5W head unit: battery % on arrival, charging stops, realistic charge times, and automatic battery preconditioning on the way to a fast charger. Built on [NEMESIS](https://github.com/xwtk/hmg_nemesis) and [HMG Leafia Plus](https://github.com/VysseCodes/HMG-Leafia-Plus).
+Real EV routing in Google Maps on Android Auto for the Gen5W head unit in the Hyundai Ioniq 5 and Kia EV6: battery % on arrival, charging stops, realistic charge times, and automatic battery preconditioning on the way to a fast charger. Built on [NEMESIS](https://github.com/xwtk/hmg_nemesis) and [HMG Leafia Plus](https://github.com/VysseCodes/HMG-Leafia-Plus).
+
+> [!NOTE]
+> **About this fork.** [adman234/egmp-aa-ev-feat](https://github.com/adman234/egmp-aa-ev-feat) is a fork of [willemcvu/egmp-aa-ev-feat](https://github.com/willemcvu/egmp-aa-ev-feat) that adds support for other E-GMP cars, starting with the **Kia EV6** (US, software 260507). It builds one package that carries a set of files per car and works out which car it's on; the Ioniq 5 build is unchanged. Status and how to build for your car: [PORTING](docs/PORTING.md). The goal is to send this back upstream once it's tested on an EV6.
 
 > [!WARNING]
 > This modifies your infotainment system's files. The installer checks every file first and keeps a byte-for-byte backup, but you use it at your own risk. Not affiliated with Hyundai, Kia or Google.
@@ -8,6 +11,7 @@ Real EV routing in Google Maps on Android Auto for the Hyundai Ioniq 5's Gen5W h
 ## Requirements
 
 - Hyundai Ioniq 5 (US), Gen5W software `NEEV.USA.0000.V015.012.260507`
+- Kia EV6 (US), software `CVEV.USA.*.260507`: supported by the code, built from an owner's own files ([PORTING](docs/PORTING.md)); not yet tested on the car
 - [NEMESIS](https://github.com/xwtk/hmg_nemesis) installed
 - **[HMG Leafia Plus](https://github.com/VysseCodes/HMG-Leafia-Plus) v1.0.5 installed first.** This package builds on Leafia's modified Android Auto files; without exactly v1.0.5 the installer refuses and changes nothing.
 
@@ -51,6 +55,7 @@ Logs from different cars, climates and battery ages are what improve the energy 
 | [DATA-SOURCES](docs/DATA-SOURCES.md) | vehicle data the head unit exposes |
 | [RESEARCH](docs/RESEARCH.md) | head unit internals and the patch design |
 | [HANDOFF](docs/HANDOFF.md) | developer guide: build, install, troubleshooting |
+| [PORTING](docs/PORTING.md) | other cars: the EV6, what differs, building from your car's files |
 | [ROADMAP](docs/ROADMAP.md) | what's next |
 
 ## Building
@@ -61,6 +66,7 @@ The build patches files from your own head unit (not in this repo); see [HANDOFF
 PY=/path/to/python sh tools/build_all.sh   # build everything
 sh gpm-ev/test/run.sh                      # Java host tests
 bash tools/test_package.sh                 # package install/uninstall sandbox
+SYNTH=1 bash tools/test_package.sh         # same, on made-up files for two cars (no car files)
 sh tools/test_evlog.sh                     # EV log tools
 sh tools/build_release.sh v0.2.0           # USB release zip
 ```

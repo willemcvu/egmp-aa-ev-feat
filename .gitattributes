@@ -1,0 +1,5 @@
+# LF everywhere: the package scripts run on the head unit's shell, which
+# breaks on CRLF, so a Windows checkout (core.autocrlf) must not convert them.
+* text=auto eol=lf
+third_party/lpatch/lpatch binary
+*.lpd binary

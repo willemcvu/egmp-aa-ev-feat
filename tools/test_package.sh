@@ -12,12 +12,20 @@
 #   5. refusal on unknown live files
 #   6. upgrade over an earlier build of this package (different GPM APK)
 #   7. refusal when the Leafia snapshot is not intact
-#   8. the package carries only deltas, lpatch and the manifest
+#   8. the package carries only deltas, lpatch and the manifests
 #   9. EV-log offload to an opted-in USB drive
+#  10. a second car: install picks its files, uninstall restores them
+#  11. refusal on a mix of two cars' files
+#  12. reinstall over ours on the second car rebuilds from its snapshot
 #
-# files/lpatch is the real ARM binary; it runs here through qemu binfmt.
-#
-# Run from the repo root after packages/aa-ev-model/build.sh.
+# Two ways to run, from the repo root:
+#   bash tools/test_package.sh          after tools/build_all.sh: the real
+#                                       package, every car it was built for
+#   SYNTH=1 bash tools/test_package.sh  builds a package from made-up files for
+#                                       two cars (no Hyundai files needed; CI)
+# files/lpatch is the real ARM binary and runs through qemu binfmt, unless
+# LPATCH_HOST names a host lpatch to use in its place (e.g. on Windows).
+# SYNTH also needs PY (python with bsdiff4) and LPATCH (host lpatch command).
 
 set -u
 cd "$(dirname "$0")/.."
@@ -26,25 +34,63 @@ T=/tmp/opencode/pkgtest
 rm -rf "$T"
 mkdir -p "$T"
 
-PRIV=private/car-current-leafia105
-SUM_BASE_APK=0308224b94c7e1b81d372a8ea1535aed
-SUM_BASE_ODEX=7d81a60aabf89efdd4ce12ba9787248e
-SUM_BASE_LIB=c08410a8d32a615b1aa805cd8a243d52
-SUM_PAY_APK=$(md5sum dist/HKMC_GPM.apk | cut -d' ' -f1)
-SUM_PAY_LIB=$(md5sum dist/libautoreceiver_infobank.so | cut -d' ' -f1)
-
 md5_of() { md5sum "$1" | cut -d' ' -f1; }
 
-# Build a sandbox with a fresh "car" state: Leafia v1.0.5 live files.
+if [ "${SYNTH:-0}" = 1 ]; then
+    # Two made-up cars sharing one AA library, as the Ioniq 5 and EV6 do.
+    SY=$T/synth
+    mkdir -p "$SY"
+    head -c 300000 /dev/urandom > "$SY/lib"
+    for c in neev ev6; do
+        mkdir -p "$SY/cars/$c/base" "$SY/dist/$c"
+        head -c 200000 /dev/urandom > "$SY/cars/$c/base/HKMC_GPM.apk"
+        head -c 100000 /dev/urandom > "$SY/cars/$c/base/HKMC_GPM.odex"
+        cp "$SY/lib" "$SY/cars/$c/base/libautoreceiver_infobank.so"
+        { cat "$SY/cars/$c/base/HKMC_GPM.apk"; echo "EV classes for $c"; } > "$SY/dist/$c/HKMC_GPM.apk"
+        { head -c 150000 "$SY/lib"; printf 'PATCHED'; tail -c +150008 "$SY/lib"; } \
+            > "$SY/dist/$c/libautoreceiver_infobank.so"
+        ( cd "$SY/cars/$c/base" && md5sum -t HKMC_GPM.apk HKMC_GPM.odex libautoreceiver_infobank.so ) \
+            > "$SY/dist/$c/BASE"
+        echo "Synthetic $c" > "$SY/dist/$c/NAME"
+    done
+    CARS_DIR=$SY/cars DIST=$SY/dist OUT=$SY/aa.ev.model.zip \
+        sh packages/aa-ev-model/build.sh neev ev6 > "$T/synth-build.log" 2>&1 || {
+        cat "$T/synth-build.log"; echo "FAIL: synthetic package build"; exit 1; }
+    CARS_DIR=$SY/cars
+    DIST=$SY/dist
+    PKG_ZIP=$SY/aa.ev.model.zip
+else
+    CARS_DIR=build/cars
+    DIST=dist
+    PKG_ZIP=dist/aa.ev.model.zip
+fi
+
+CARS=$(cd packages/aa-ev-model/files && for d in *; do [ -f "$d/BASE" ] && echo "$d"; done)
+CAR_A=$(echo $CARS | cut -d' ' -f1)
+CAR_B=$(echo $CARS | cut -d' ' -s -f2)
+echo "cars in the package: $(echo $CARS)"
+
+# use_sums <car>: SUM_BASE_* (its Leafia files) and SUM_PAY_* (our payloads)
+use_sums() {
+    SUM_BASE_APK=$(md5_of "$CARS_DIR/$1/base/HKMC_GPM.apk")
+    SUM_BASE_ODEX=$(md5_of "$CARS_DIR/$1/base/HKMC_GPM.odex")
+    SUM_BASE_LIB=$(md5_of "$CARS_DIR/$1/base/libautoreceiver_infobank.so")
+    SUM_PAY_APK=$(md5_of "$DIST/$1/HKMC_GPM.apk")
+    SUM_PAY_LIB=$(md5_of "$DIST/$1/libautoreceiver_infobank.so")
+}
+use_sums "$CAR_A"
+
+# Build a sandbox with a fresh "car" state: a car's Leafia v1.0.5 live files
+# (setup_sandbox <dir> [car], default the first car).
 setup_sandbox() {
-    local S="$1"
+    local S="$1" C="${2:-$CAR_A}"
     rm -rf "$S"
     mkdir -p "$S/system/app" "$S/system/lib" "$S/system/xbin" "$S/system/bin" \
              "$S/data/nemesis/apps/aa.ev.model" "$S/data/nemesis/bin" \
              "$S/data/dalvik-cache"
-    cp "$PRIV/HKMC_GPM.apk" "$S/system/app/HKMC_GPM.apk"
-    cp "$PRIV/HKMC_GPM.odex" "$S/system/app/HKMC_GPM.odex"
-    cp "$PRIV/libautoreceiver_infobank.so" "$S/system/lib/libautoreceiver_infobank.so"
+    cp "$CARS_DIR/$C/base/HKMC_GPM.apk" "$S/system/app/HKMC_GPM.apk"
+    cp "$CARS_DIR/$C/base/HKMC_GPM.odex" "$S/system/app/HKMC_GPM.odex"
+    cp "$CARS_DIR/$C/base/libautoreceiver_infobank.so" "$S/system/lib/libautoreceiver_infobank.so"
 
     # The package, with absolute paths rewritten into the sandbox. files/ holds
     # binary payloads: copy those verbatim, sed only the text files.
@@ -123,6 +169,16 @@ EOF
     for _t in cp mv rm rmdir mkdir chmod chown cmp grep tail touch cat sync md5sum dirname date; do
         ln -sf "$(command -v "$_t")" "$S/system/bin/$_t"
     done
+    # Git Bash copies instead of linking, and the copies need the MSYS DLLs
+    # next to them (the scripts' PATH has no /usr/bin).
+    if [ -f /usr/bin/msys-2.0.dll ]; then
+        cp /usr/bin/msys-*.dll "$S/system/bin/"
+    fi
+    if [ -n "${LPATCH_HOST:-}" ]; then
+        printf '#!/bin/bash\nexec "%s" "$@"\n' "$LPATCH_HOST" \
+            > "$S/data/nemesis/apps/aa.ev.model/files/lpatch"
+        chmod +x "$S/data/nemesis/apps/aa.ev.model/files/lpatch"
+    fi
 }
 
 run_script() {
@@ -263,10 +319,18 @@ check "live APK untouched" $?
 
 echo "=== 8. package contents ==="
 [ "$(cd packages/aa-ev-model/files && LC_ALL=C ls | LC_ALL=C sort | tr '\n' ' ')" = \
-  "HKMC_GPM.apk.lpd MD5SUMS libautoreceiver_infobank.so.lpd lpatch " ]
-check "files/ holds only deltas, lpatch and MD5SUMS" $?
-! unzip -l dist/aa.ev.model.zip | grep -E '\.(apk|so|odex|dex)$' >/dev/null
+  "$(echo $CARS lpatch | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ' ')" ]
+check "files/ holds lpatch and one folder per car" $?
+_ok=0
+for c in $CARS; do
+    [ "$(cd "packages/aa-ev-model/files/$c" && LC_ALL=C ls | LC_ALL=C sort | tr '\n' ' ')" = \
+      "BASE HKMC_GPM.apk.lpd MD5SUMS NAME libautoreceiver_infobank.so.lpd " ] || _ok=1
+done
+check "each car folder holds only deltas and manifests" $_ok
+! unzip -l "$PKG_ZIP" | grep -E '\.(apk|so|odex|dex)$' >/dev/null
 check "package zip has no APK/so/odex/dex" $?
+unzip -l "$PKG_ZIP" | grep -q " files/$CAR_A/BASE$"
+check "package zip carries the car folders" $?
 
 echo "=== 9. EV-log offload ==="
 S=$T/s9
@@ -301,6 +365,56 @@ echo "15,91" >> "$EV/egmp-NEEV-20261029-001.csv"
 PASSES=3 run_offload > /dev/null
 [ "$(grep -c TOAST "$S/toast.log" 2>/dev/null)" = 1 ]
 check "one pop-up per insertion across passes" $?
+
+if [ -n "$CAR_B" ]; then
+    use_sums "$CAR_B"
+    echo "=== 10. second car ($CAR_B): install and uninstall ==="
+    S=$T/s10
+    setup_sandbox "$S" "$CAR_B"
+    run_script "$S" pre.sh > "$T/s10.pre.log" 2>&1
+    check "pre.sh accepts $CAR_B's Leafia files" $?
+    grep -q "Leafia v1.0.5 on $(cat "$DIST/$CAR_B/NAME")" "$S/data/nemesis/aa.ev.model.log"
+    check "pre.sh names the car" $?
+    run_script "$S" post.sh > "$T/s10.post.log" 2>&1
+    check "post.sh installs" $?
+    [ "$(md5_of "$S/system/app/HKMC_GPM.apk")" = "$SUM_PAY_APK" ]
+    check "live APK is $CAR_B's payload" $?
+    [ "$(md5_of "$S/system/lib/libautoreceiver_infobank.so")" = "$SUM_PAY_LIB" ]
+    check "live lib is $CAR_B's payload" $?
+    run_script "$S" preun.sh > "$T/s10.preun.log" 2>&1
+    check "preun.sh runs" $?
+    [ "$(md5_of "$S/system/app/HKMC_GPM.apk")" = "$SUM_BASE_APK" ] &&
+    [ "$(md5_of "$S/system/app/HKMC_GPM.odex")" = "$SUM_BASE_ODEX" ] &&
+    [ "$(md5_of "$S/system/lib/libautoreceiver_infobank.so")" = "$SUM_BASE_LIB" ]
+    check "$CAR_B's Leafia files restored byte for byte" $?
+
+    echo "=== 11. refusal on a mix of two cars' files ==="
+    S=$T/s11
+    setup_sandbox "$S" "$CAR_A"
+    cp "$CARS_DIR/$CAR_B/base/HKMC_GPM.odex" "$S/system/app/HKMC_GPM.odex"
+    run_script "$S" pre.sh > "$T/s11.pre.log" 2>&1
+    [ $? -ne 0 ]
+    check "pre.sh refuses $CAR_A's APK with $CAR_B's odex" $?
+    [ ! -d "$S/data/nemesis/build/aa.ev.model" ] && [ ! -d "$S/data/nemesis/backup/aa.ev.model" ]
+    check "nothing built or snapshotted" $?
+
+    echo "=== 12. reinstall over ours on $CAR_B ==="
+    S=$T/s12
+    setup_sandbox "$S" "$CAR_B"
+    run_script "$S" pre.sh > /dev/null 2>&1 && run_script "$S" post.sh > /dev/null 2>&1
+    echo "EARLIER BUILD APK" > "$S/system/app/HKMC_GPM.apk"
+    run_script "$S" pre.sh > "$T/s12.pre.log" 2>&1
+    check "pre.sh rebuilds from $CAR_B's snapshot" $?
+    run_script "$S" post.sh > /dev/null 2>&1
+    [ "$(md5_of "$S/system/app/HKMC_GPM.apk")" = "$SUM_PAY_APK" ]
+    check "live APK is $CAR_B's payload again" $?
+    run_script "$S" preun.sh > /dev/null 2>&1
+    [ "$(md5_of "$S/system/app/HKMC_GPM.apk")" = "$SUM_BASE_APK" ]
+    check "uninstall restores $CAR_B's Leafia APK" $?
+    use_sums "$CAR_A"
+else
+    echo "=== 10-12 skipped: the package has one car ==="
+fi
 
 echo
 echo "passed: $pass, failed: $fail"
