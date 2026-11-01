@@ -1,7 +1,7 @@
 #!/bin/sh
 # Compile the EvModelSender/EvModelTemplate, EvVehicle, EvFirmware, EV log (EvDriveLog, EvLogger,
 # EvRowAgg, EvCar) and preconditioning (NavProto,
-# PrecondCore, Precond) Java sources to smali in
+# PrecondCore, Precond) and early Bluetooth handoff (BtHandoff) Java sources to smali in
 # gpm-ev/build/smali, ready for tools/patch_gpm_smali.py.
 # Needs ~/tools/env.sh (Android SDK with platforms/android-19 + build-tools/34).
 set -e
@@ -19,6 +19,7 @@ javac -source 8 -target 8 \
     src/$PKG/EvCar.java src/$PKG/EvDriveLog.java src/$PKG/EvRowAgg.java \
     src/$PKG/NavProto.java src/$PKG/PrecondCore.java src/$PKG/Precond.java \
     src/$PKG/EvFirmware.java src/$PKG/EvVehicle.java \
+    src/$PKG/BtHandoff.java \
     stubs/$PKG/SensorSource.java \
     stubs/com/hkmc/cluster/NavigationCluster.java \
     stubs/com/hkmc/cluster/NavigationClusterListener.java
@@ -37,7 +38,8 @@ D8="$ANDROID_HOME/build-tools/34.0.0/d8"
     build/classes/$PKG/NavProto*.class \
     build/classes/$PKG/Precond*.class \
     build/classes/$PKG/EvFirmware*.class \
-    build/classes/$PKG/EvVehicle*.class
+    build/classes/$PKG/EvVehicle*.class \
+    build/classes/$PKG/BtHandoff*.class
 
 ${BAKSMALI:-baksmali} d build/dex/classes.dex -o build/smali
 

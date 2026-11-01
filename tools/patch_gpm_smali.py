@@ -44,6 +44,21 @@ wrapping, so a logger failure can never break GPM or Android Auto:
 EvDriveLog is not gated by persist.gpm.ev.off (no runtime switches; it only
 reads). GalReceiver.smali (which Leafia already patches) is not touched.
 
+and the early Bluetooth handoff (BtHandoff): stock GPM switches the car's
+Bluetooth manager to phone-projection mode only when the phone sends its
+Bluetooth pairing request, which Android Auto delays by 120 s; the switch
+drops the phone's A2DP link and media apps on the phone pause. Done at
+session start instead (wireless only, persist.gpm.bt.early.off=1 turns it
+off):
+
+ 13. BluetoothEndpoint.init(): BtHandoff.onSessionStart(mService), catch-all.
+ 14. BluetoothEndpoint.shutdown(): BtHandoff.stop(), catch-all.
+ 15. sink/e/a (GPM's Bluetooth helper): new field evEarly and method
+     evEarlyHandoff()I (ag()'s guards without its retry flags, then the same
+     a(true, 0) call); ag() clears evEarly on entry.
+ 16. sink/e/e (BTCM receiver): BTCM_CONNECTIVITY_POSSIBLE with evEarly set
+     clears it and sends no pairing response (no request to answer).
+
 Idempotent: re-running rebuilds the tree from scratch. Fails loudly if any
 anchor is not found exactly once.
 """
@@ -62,6 +77,13 @@ START_RECEIVER = "com/google/android/projection/service/StartReceiver.smali"
 GAL_SERVICE = "com/google/android/projection/service/GalReceiverService.smali"
 EVLOG = "Lcom/google/android/projection/protocol/EvDriveLog;"
 PRECOND = "Lcom/google/android/projection/protocol/Precond;"
+BT_ENDPOINT_FILE = "com/google/android/projection/protocol/BluetoothEndpoint.smali"
+BT_HELPER_FILE = "com/google/android/projection/sink/e/a.smali"
+BT_RECEIVER_FILE = "com/google/android/projection/sink/e/e.smali"
+BT_ENDPOINT = "Lcom/google/android/projection/protocol/BluetoothEndpoint;"
+BT_HELPER = "Lcom/google/android/projection/sink/e/a;"
+BT_HANDOFF = "Lcom/google/android/projection/protocol/BtHandoff;"
+GAL_SERVICE_T = "Lcom/google/android/projection/service/GalReceiverService;"
 
 MARK = "EV patch"
 
@@ -343,11 +365,203 @@ GAL_EDITS = [
     ("onDestroy -> EvDriveLog.flush", GAL_DESTROY_OLD, GAL_DESTROY_NEW),
 ]
 
+# --- Early Bluetooth handoff (BtHandoff) ----------------------------------------
+# init (.registers 7): v0/v1 are written after the hook (const, move-result).
+# shutdown (.registers 4): v0 is written by the sget after the hook.
+BT_ENDPOINT_HOOK = f"""\
+iget-object v1, p0, {BT_ENDPOINT}->mService:{GAL_SERVICE_T}
+
+    invoke-static {{v1}}, {BT_HANDOFF}->onSessionStart(Ljava/lang/Object;)V"""
+
+BT_INIT_OLD = f"""\
+    const-string v1, "init"
+
+    invoke-static {{v0, v1}}, Lcom/google/android/projection/sink/c/k;->i(Ljava/lang/String;Ljava/lang/String;)V
+
+"""
+BT_INIT_NEW = BT_INIT_OLD + guarded_call(
+    "bt_early_start", BT_ENDPOINT_HOOK, "early Bluetooth handoff") + "\n"
+
+BT_SHUTDOWN_OLD = """\
+.method public shutdown()V
+    .registers 4
+
+    const/4 v2, 0x0
+
+"""
+BT_SHUTDOWN_NEW = BT_SHUTDOWN_OLD + guarded_call(
+    "bt_early_stop", f"invoke-static {{}}, {BT_HANDOFF}->stop()V",
+    "early Bluetooth handoff") + "\n"
+
+BT_ENDPOINT_EDITS = [
+    ("init -> BtHandoff.onSessionStart", BT_INIT_OLD, BT_INIT_NEW),
+    ("shutdown -> BtHandoff.stop", BT_SHUTDOWN_OLD, BT_SHUTDOWN_NEW),
+]
+
+# sink.e.a, GPM's Bluetooth helper. evEarly is set by evEarlyHandoff and
+# cleared by ag() (a real pairing request) or by the receiver below.
+BT_FIELD_OLD = """\
+.field private gB:Z
+"""
+BT_FIELD_NEW = """\
+# EV patch: early Bluetooth handoff in progress
+.field public evEarly:Z
+
+""" + BT_FIELD_OLD
+
+# ag()'s guards, without its retry flags (gC/gD would make GPM answer a
+# pairing request nobody sent). Wireless sessions only: on USB the car learns
+# the phone's address from the pairing request itself.
+BT_EARLY_METHOD = f"""\
+# EV patch: early Bluetooth handoff (BtHandoff). Returns 0 done or skipped, 1 retry.
+.method public final evEarlyHandoff()I
+    .registers 5
+
+    const/4 v2, 0x1
+
+    const/4 v3, 0x0
+
+    iget-object v0, p0, {BT_HELPER}->mService:{GAL_SERVICE_T}
+
+    invoke-virtual {{v0}}, {GAL_SERVICE_T}->getGpmConnectMode()I
+
+    move-result v0
+
+    const/4 v1, 0x2
+
+    if-eq v0, v1, :cond_ev_wireless
+
+    return v3
+
+    :cond_ev_wireless
+    iget-object v0, p0, {BT_HELPER}->mUtils:Lcom/google/android/projection/sink/d/d;
+
+    invoke-virtual {{v0}}, Lcom/google/android/projection/sink/d/d;->cB()Z
+
+    move-result v0
+
+    if-nez v0, :cond_ev_skip
+
+    iget-object v0, p0, {BT_HELPER}->mUtils:Lcom/google/android/projection/sink/d/d;
+
+    invoke-virtual {{v0}}, Lcom/google/android/projection/sink/d/d;->cO()Z
+
+    move-result v0
+
+    if-nez v0, :cond_ev_skip
+
+    iget-object v0, p0, {BT_HELPER}->mService:{GAL_SERVICE_T}
+
+    invoke-virtual {{v0}}, {GAL_SERVICE_T}->getMicomPowerStatus()I
+
+    move-result v0
+
+    const/4 v1, 0x6
+
+    if-eq v0, v1, :cond_ev_retry
+
+    const/16 v1, 0xff
+
+    if-eq v0, v1, :cond_ev_retry
+
+    iget-boolean v0, p0, {BT_HELPER}->gB:Z
+
+    if-eqz v0, :cond_ev_retry
+
+    invoke-virtual {{p0}}, {BT_HELPER}->aj()I
+
+    move-result v0
+
+    if-nez v0, :cond_ev_retry
+
+    iput-boolean v2, p0, {BT_HELPER}->evEarly:Z
+
+    sget-object v0, {BT_HELPER}->TAG:Ljava/lang/String;
+
+    const-string v1, "early BT handoff at session start"
+
+    invoke-static {{v0, v1}}, Lcom/google/android/projection/sink/c/k;->i(Ljava/lang/String;Ljava/lang/String;)V
+
+    invoke-direct {{p0, v2, v3}}, {BT_HELPER}->a(ZI)V
+
+    return v3
+
+    :cond_ev_retry
+    sget-object v0, {BT_HELPER}->TAG:Ljava/lang/String;
+
+    const-string v1, "early BT handoff: not ready (BTCM, power or call), retry"
+
+    invoke-static {{v0, v1}}, Lcom/google/android/projection/sink/c/k;->i(Ljava/lang/String;Ljava/lang/String;)V
+
+    return v2
+
+    :cond_ev_skip
+    sget-object v0, {BT_HELPER}->TAG:Ljava/lang/String;
+
+    const-string v1, "early BT handoff skipped :: Emergency or Valet mode"
+
+    invoke-static {{v0, v1}}, Lcom/google/android/projection/sink/c/k;->i(Ljava/lang/String;Ljava/lang/String;)V
+
+    return v3
+.end method
+
+"""
+BT_AG_OLD = """\
+.method public final ag()V
+    .registers 6
+
+    const/4 v1, 0x0
+
+"""
+BT_AG_NEW = BT_EARLY_METHOD + BT_AG_OLD + f"""\
+    # EV patch: a real pairing request, answered as stock
+    iput-boolean v1, p0, {BT_HELPER}->evEarly:Z
+
+"""
+
+BT_HELPER_EDITS = [
+    ("field evEarly", BT_FIELD_OLD, BT_FIELD_NEW),
+    ("evEarlyHandoff + ag() clears evEarly", BT_AG_OLD, BT_AG_NEW),
+]
+
+# sink.e.e (BTCM receiver): the connectivity broadcast that follows the early
+# handoff has no pairing request behind it, so send no pairing response.
+# v0/v1 are scratch here (rewritten below); v3 (= 1) is left alone.
+BT_POSSIBLE_OLD = """\
+    const-string v1, "ACTION_BTCM_CONNECTIVITY_POSSIBLE"
+
+    invoke-static {v0, v1}, Lcom/google/android/projection/sink/c/k;->d(Ljava/lang/String;Ljava/lang/String;)V
+
+"""
+BT_POSSIBLE_NEW = BT_POSSIBLE_OLD + f"""\
+    # EV patch: early Bluetooth handoff, no pairing request to answer
+    iget-object v0, p0, Lcom/google/android/projection/sink/e/e;->ia:{BT_HELPER}
+
+    iget-boolean v1, v0, {BT_HELPER}->evEarly:Z
+
+    if-eqz v1, :cond_ev_early
+
+    const/4 v1, 0x0
+
+    iput-boolean v1, v0, {BT_HELPER}->evEarly:Z
+
+    goto/16 :goto_5
+
+    :cond_ev_early
+"""
+
+BT_RECEIVER_EDITS = [
+    ("CONNECTIVITY_POSSIBLE skips early handoff", BT_POSSIBLE_OLD, BT_POSSIBLE_NEW),
+]
+
 FILE_EDITS = [
     (SENSOR_SOURCE, EDITS),
     (NAVI_TBT, NAVI_EDITS),
     (START_RECEIVER, RECV_EDITS),
     (GAL_SERVICE, GAL_EDITS),
+    (BT_ENDPOINT_FILE, BT_ENDPOINT_EDITS),
+    (BT_HELPER_FILE, BT_HELPER_EDITS),
+    (BT_RECEIVER_FILE, BT_RECEIVER_EDITS),
 ]
 
 
