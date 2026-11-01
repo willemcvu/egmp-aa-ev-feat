@@ -4,7 +4,15 @@
 log "postinstall aa.ev.model"
 trap '[ $? = 0 ] || { sys_ro; apps_release; }' EXIT
 
-# payloads rebuilt by preinstall: check them again before touching /system
+# payloads rebuilt by preinstall (for the car it recorded): check them again
+# before touching /system
+_car=$(cat "$PAYLOAD/CAR" 2>/dev/null)
+if [ -z "$_car" ] || [ ! -f "$FILES/$_car/BASE" ]; then
+    log "FAIL: no car recorded by preinstall"
+    exit 1
+fi
+use_car "$_car" || exit 1
+log "installing for $CAR_NAME"
 sum_is "$PAYLOAD/HKMC_GPM.apk" "$(manifest_sum HKMC_GPM.apk)" || exit 1
 sum_is "$PAYLOAD/libautoreceiver_infobank.so" "$(manifest_sum libautoreceiver_infobank.so)" || exit 1
 

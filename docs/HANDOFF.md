@@ -40,7 +40,9 @@ Local, gitignored inputs: `private/car-current-leafia105/` (the live GPM APK/ode
 
 Verified on the car: EV routing; capacity ~62.9 kWh learned from the BMS; outside temp matches the dash; Maps' charge times look right; preconditioning REQUESTED → ACTIVE on short routes, cancel on route end (Off within ~2.5 s), stays REQUESTED on a 58-min route; EV logs (v1) copied to USB with the pop-up.
 
-Tests (host): `sh gpm-ev/test/run.sh` (PrecondTest, SenderRowTest, ScaleTest), `bash tools/test_package.sh` (install / uninstall / upgrade / Leafia-removed-in-between / refusal / log offload in a sandbox), `sh tools/test_evlog.sh`.
+Tests (host): `sh gpm-ev/test/run.sh` (PrecondTest, SenderRowTest, ScaleTest, MultiCarTest), `bash tools/test_package.sh` (install / uninstall / upgrade / Leafia-removed-in-between / refusal / log offload / second car / mixed cars in a sandbox; `SYNTH=1` runs it on made-up files), `sh tools/test_evlog.sh`. CI (`.github/workflows/test.yml`) runs all of them with `SYNTH=1`.
+
+**Multi-car (2026-11-01):** the build and package now take one set of files per car (`tools/cars.txt`, `private/<car>/`, `dist/<car>/`, `files/<car>/` in the package); the original Ioniq 5 `private/` layout still works. One dex serves every car: `EvVehicle` picks road load by product and VIN, `EvFirmware` resolves binder transaction numbers from the framework and gates preconditioning on known frameworks. See [PORTING.md](PORTING.md).
 
 ## Build prerequisites
 

@@ -14,6 +14,8 @@ final class EvModelTemplate {
     static final String MODEL_REV = "85095543";  // sha1 of the batch, short
     static final int ROAD_A_OFFSET = 44;  // road_load.a_n float bits
     static final float ROAD_A_N = 196.0f;
+    static final int ROAD_C_OFFSET = 58;  // road_load.c_n_per_mps2 float bits
+    static final float ROAD_C_N = 0.493f;
     // extra road load A vs outside temp (C), linear between, clamped
     static final float[] COLD_TEMPS_C = {10.0f, -6.7f, -24.4f, -35.0f};
     static final float[] COLD_DELTA_A_N = {0.0f, 156.0f, 483.0f, 679.0f};

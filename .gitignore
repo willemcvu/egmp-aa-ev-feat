@@ -39,3 +39,8 @@ venv/
 
 # Claude Code agent worktrees
 .claude/
+
+# Windows build outputs
+/lpatch.exe
+/lpatch.pdb
+/META-INF/

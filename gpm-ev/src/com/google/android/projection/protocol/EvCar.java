@@ -17,7 +17,10 @@ import com.hkmc.cluster.NavigationClusterListener;
  * (always on), so the two never read the same signal twice in a row.
  *
  * Every call is a getter (docs/DATA-SOURCES.md); nothing here writes to the
- * car. Every method catches everything and returns "unknown" (-1 / NaN /
+ * car. Transaction numbers come from EvFirmware.txn(): the framework's own
+ * AIDL stubs, or the numbers verified on the Ioniq 5 only on that framework,
+ * so on another car's software a read is skipped rather than risk calling a
+ * different method. Every method catches everything and returns "unknown" (-1 / NaN /
  * null): this runs inside GPM, where an uncaught exception kills Android
  * Auto. Any thread.
  *
@@ -129,6 +132,11 @@ final class EvCar {
     /** IHEVService.getHEVStatus(flag) via binder transaction 3, -1 on failure. */
     private static int hevRead(int flag) {
         try {
+            int tx = txn(HEV_TOKEN, "getHEVStatus", new String[] {"int"}, INT,
+                    HEV_TX_GET_HEV_STATUS, true);
+            if (tx < 0) {
+                return -1;
+            }
             IBinder b = sHev;
             if (b == null) {
                 b = service(HEV_SERVICE);
@@ -142,7 +150,7 @@ final class EvCar {
             try {
                 data.writeInterfaceToken(HEV_TOKEN);
                 data.writeInt(flag);
-                if (!b.transact(HEV_TX_GET_HEV_STATUS, data, reply, 0)) {
+                if (!b.transact(tx, data, reply, 0)) {
                     return -1;
                 }
                 reply.readException();
@@ -161,7 +169,8 @@ final class EvCar {
 
     /** Display speed in km/h (hscan getCarSpeed unit 0), NaN if unknown. */
     static float speedKph() {
-        float v = hscanFloat(HCAN_TX_GET_CAR_SPEED, 0);
+        float v = hscanFloat(txn(HCAN_TOKEN, "getCarSpeed", new String[] {"byte"},
+                new String[] {"float"}, HCAN_TX_GET_CAR_SPEED, false), 0);
         return Float.isNaN(v) || v < 0 || v > 400 ? Float.NaN : v;
     }
 
@@ -169,7 +178,8 @@ final class EvCar {
     static int sohRaw() {
         int s = sSohRaw;
         if (s <= 0) {
-            int v = hscanInt(HCAN_TX_GET_SOH);
+            int v = hscanInt(txn(HCAN_TOKEN, "getXEV_Bms_GDS_SOH", NONE, INT,
+                    HCAN_TX_GET_SOH, false));
             if (v != s) {
                 Log.i(TAG, "BMS SOH raw: " + v);
             }
@@ -187,7 +197,8 @@ final class EvCar {
     static String vinModel() {
         String m = sVinModel;
         if (m == null || m.length() == 0) {
-            String vin = hscanString(HCAN_TX_GET_VIN);
+            String vin = hscanString(txn(HCAN_TOKEN, "getVIN", NONE,
+                    new String[] {"java.lang.String"}, HCAN_TX_GET_VIN, false));
             m = vin != null && vin.matches("[A-HJ-NPR-Z0-9]{17}")
                     ? vin.substring(0, 8) + vin.charAt(9) : "";
             sVinModel = m;
@@ -207,7 +218,7 @@ final class EvCar {
     /** hscan float getter with one byte argument, NaN on failure. */
     private static float hscanFloat(int txn, int arg) {
         try {
-            IBinder b = hscan();
+            IBinder b = txn < 0 ? null : hscan();
             if (b == null) {
                 return Float.NaN;
             }
@@ -234,7 +245,7 @@ final class EvCar {
     /** hscan int getter without arguments, -1 on failure. */
     private static int hscanInt(int txn) {
         try {
-            IBinder b = hscan();
+            IBinder b = txn < 0 ? null : hscan();
             if (b == null) {
                 return -1;
             }
@@ -260,7 +271,7 @@ final class EvCar {
     /** hscan String getter, null on failure. */
     private static String hscanString(int txn) {
         try {
-            IBinder b = hscan();
+            IBinder b = txn < 0 ? null : hscan();
             if (b == null) {
                 return null;
             }
@@ -444,7 +455,9 @@ final class EvCar {
 
     private static float climateUncached(int flag) {
         try {
-            IBinder b = datc();
+            int tx = txn(DATC_TOKEN, "getVRClimateStatus", new String[] {"int"},
+                    new String[] {"float"}, DATC_TX_GET_VR_CLIMATE_STATUS, false);
+            IBinder b = tx < 0 ? null : datc();
             if (b == null) {
                 return Float.NaN;
             }
@@ -453,7 +466,7 @@ final class EvCar {
             try {
                 data.writeInterfaceToken(DATC_TOKEN);
                 data.writeInt(flag);
-                if (!b.transact(DATC_TX_GET_VR_CLIMATE_STATUS, data, reply, 0)) {
+                if (!b.transact(tx, data, reply, 0)) {
                     return Float.NaN;
                 }
                 reply.readException();
@@ -472,7 +485,9 @@ final class EvCar {
     /** IDATCService.isUnitCelsius(unit): 1 yes, 0 no, -1 unknown. */
     static int climateUnitIsCelsius(int unitRaw) {
         try {
-            IBinder b = datc();
+            int tx = txn(DATC_TOKEN, "isUnitCelsius", new String[] {"int"},
+                    new String[] {"boolean", "int"}, DATC_TX_IS_UNIT_CELSIUS, false);
+            IBinder b = tx < 0 ? null : datc();
             if (b == null) {
                 return -1;
             }
@@ -481,7 +496,7 @@ final class EvCar {
             try {
                 data.writeInterfaceToken(DATC_TOKEN);
                 data.writeInt(unitRaw);
-                if (!b.transact(DATC_TX_IS_UNIT_CELSIUS, data, reply, 0)) {
+                if (!b.transact(tx, data, reply, 0)) {
                     return -1;
                 }
                 reply.readException();
@@ -501,6 +516,7 @@ final class EvCar {
     private static volatile int sDriveMode = -1;
     private static volatile IBinder sBcmRegisteredWith;
     private static Binder sBcmListener;
+    private static volatile int sBcmChangedTx = -1;
     private static long sBcmTriedAt;
 
     /**
@@ -528,6 +544,15 @@ final class EvCar {
     private static void registerBcm() {
         try {
             sDriveMode = -1;
+            int tx = txn(BCM_TOKEN, "registerBCMListener",
+                    new String[] {BCM_LISTENER, "*"}, new String[] {"void"},
+                    BCM_TX_REGISTER_LISTENER, false);
+            sBcmChangedTx = txn(BCM_LISTENER, "onDriveModeChanged",
+                    new String[] {"int"}, new String[] {"void"},
+                    BCM_LTX_ON_DRIVE_MODE_CHANGED, false);
+            if (tx < 0 || sBcmChangedTx < 0) {
+                return;
+            }
             IBinder bcm = service(BCM_SERVICE);
             if (bcm == null || !BCM_TOKEN.equals(bcm.getInterfaceDescriptor())) {
                 return;
@@ -541,7 +566,7 @@ final class EvCar {
                 data.writeInterfaceToken(BCM_TOKEN);
                 data.writeStrongBinder(sBcmListener);
                 data.writeStrongBinder(new Binder());
-                if (!bcm.transact(BCM_TX_REGISTER_LISTENER, data, reply, 0)) {
+                if (!bcm.transact(tx, data, reply, 0)) {
                     return;
                 }
                 reply.readException();
@@ -566,7 +591,7 @@ final class EvCar {
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) {
             try {
                 if (code >= FIRST_CALL_TRANSACTION && code <= LAST_CALL_TRANSACTION) {
-                    if (code == BCM_LTX_ON_DRIVE_MODE_CHANGED) {
+                    if (code == sBcmChangedTx) {
                         data.enforceInterface(BCM_LISTENER);
                         int m = data.readInt();
                         sDriveMode = m >= 0 && m <= 0xff ? m : -1;
@@ -616,6 +641,14 @@ final class EvCar {
     }
 
     // ---- helpers ---------------------------------------------------------------
+
+    private static final String[] NONE = {};
+    private static final String[] INT = {"int", "byte", "short"};
+
+    private static int txn(String iface, String method, String[] params,
+            String[] rets, int verified, boolean anyKnown) {
+        return EvFirmware.txn(iface, method, params, rets, verified, anyKnown);
+    }
 
     private static IBinder service(String name) throws Exception {
         return (IBinder) Class.forName("android.os.ServiceManager")

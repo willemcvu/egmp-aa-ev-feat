@@ -10,10 +10,7 @@ import android.os.SystemClock;
 import android.util.Log;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.security.MessageDigest;
-import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -329,7 +326,7 @@ public final class Precond {
         }
     }
 
-    // ---- car access (Launchpad's OemVehicleClient, Ioniq 5 NEEV profile) -----
+    // ---- car access (Launchpad's OemVehicleClient command profile) ------------
 
     static final class HkmcVehicle implements PrecondCore.Vehicle {
         private static final String HEV_SERVICE = "com.hkmc.micom.hev";
@@ -343,15 +340,10 @@ public final class Precond {
 
         // The binder transaction numbers we send (HEV 3/62/65/66, BCM 109)
         // are defined by the car framework's method order, so commands are
-        // only sent when the framework is byte-for-byte the one they were
-        // verified on (Ioniq 5 US 260507, as in gen5w-preconditioning's
-        // profile and our private/car-neev-260507). No device-name check:
-        // identical framework files mean identical numbers.
-        static final String FRAMEWORK_SHA256 =
-                "dd72e04bce0a2b4bda1506308ac21f91002c1436553b8156c345cc4313661338";
-        static final String SERVICE_SHA256 =
-                "3cf40fb00854c63afa49abea1dad18a0afcbc0dd68b17de9ed7ea3f5aeab4222";
-
+        // only sent when the framework is byte-for-byte one they were
+        // verified on (EvFirmware.KNOWN: the Ioniq 5, EV6, Ioniq 6 software
+        // gen5w-preconditioning verified these five transactions on). No
+        // device-name check: identical framework files mean identical numbers.
         private Boolean compatible;  // null = not checked yet
 
         @Override
@@ -359,20 +351,14 @@ public final class Precond {
             if (compatible != null) {
                 return compatible.booleanValue();
             }
-            boolean ok;
-            try {
-                ok = Build.VERSION.SDK_INT == 19
-                        && FRAMEWORK_SHA256.equals(
-                                sha256("/system/framework/automotive.odex"))
-                        && SERVICE_SHA256.equals(
-                                sha256("/system/framework/automotive-service.odex"));
-            } catch (Throwable t) {
-                Log.w(TAG, "firmware check failed: " + t);
-                return false;  // retried next time
+            boolean ok = Build.VERSION.SDK_INT == 19
+                    && EvFirmware.precondVerified();
+            if (Build.VERSION.SDK_INT == 19 && !EvFirmware.checked()) {
+                return false;  // framework not readable yet: retried next time
             }
             compatible = Boolean.valueOf(ok);
-            Log.i(TAG, "firmware profile " + (ok ? "matches" : "DOES NOT match")
-                    + " (device " + Build.DEVICE + ")");
+            Log.i(TAG, "firmware profile " + (ok ? "matches " + EvFirmware.profileName()
+                    : "DOES NOT match") + " (device " + Build.DEVICE + ")");
             return ok;
         }
 
@@ -465,25 +451,6 @@ public final class Precond {
                 data.recycle();
                 reply.recycle();
             }
-        }
-
-        private static String sha256(String path) throws Exception {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            FileInputStream in = new FileInputStream(path);
-            try {
-                byte[] buf = new byte[16384];
-                int n;
-                while ((n = in.read(buf)) != -1) {
-                    md.update(buf, 0, n);
-                }
-            } finally {
-                in.close();
-            }
-            StringBuilder sb = new StringBuilder();
-            for (byte x : md.digest()) {
-                sb.append(String.format(Locale.US, "%02x", x & 0xff));
-            }
-            return sb.toString();
         }
     }
 }

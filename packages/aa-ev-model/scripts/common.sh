@@ -1,11 +1,11 @@
 #!/system/bin/sh
 # aa.ev.model — advertise ELECTRIC + sensor 23 and send the energy model to AA.
 #
-# The package ships no Hyundai/Google binaries. files/ holds lpatch deltas
-# (*.lpd) and lpatch itself; preinstall rebuilds the payloads into $PAYLOAD
-# from the unit's own Leafia v1.0.5 files (lpatch refuses any other source)
-# and checks them against files/MD5SUMS.
-# Install gates on the live files being exactly Leafia v1.0.5's files (or this
+# The package ships no Hyundai/Google binaries. files/ holds lpatch itself
+# and, per supported car, lpatch deltas (*.lpd); preinstall rebuilds that
+# car's payloads into $PAYLOAD from the unit's own Leafia v1.0.5 files (lpatch
+# refuses any other source) and checks them against files/<car>/MD5SUMS.
+# Install gates on the live files being exactly one car's Leafia v1.0.5 files (or this
 # package's own, with a verified Leafia snapshot, for a reinstall/upgrade),
 # snapshots them, and swaps in the payloads. Uninstall restores the snapshot
 # byte for byte, but only for files that are still ours (if Leafia was
@@ -31,11 +31,16 @@ GPM_APK=$APP_DIR/HKMC_GPM.apk
 GPM_ODEX=$APP_DIR/HKMC_GPM.odex
 LIB_LIVE=/system/lib/libautoreceiver_infobank.so
 
-# Live files must match these (Leafia v1.0.5 on NEEV.USA 260507) unless this
-# package's own payload is already in place.
-SUM_BASE_APK=0308224b94c7e1b81d372a8ea1535aed
-SUM_BASE_ODEX=7d81a60aabf89efdd4ce12ba9787248e
-SUM_BASE_LIB=c08410a8d32a615b1aa805cd8a243d52
+# One folder per supported car under files/ (files/<car>/): BASE (md5 of
+# that car's Leafia v1.0.5 GPM APK, odex and AA library), MD5SUMS (md5 of the
+# payloads rebuilt from them), NAME, and the two deltas. Live files must
+# match one car's BASE exactly, unless this package's own payload is already
+# in place. use_car <car> loads one car's sums into the SUM_* variables.
+CAR=
+CAR_NAME=
+SUM_BASE_APK=
+SUM_BASE_ODEX=
+SUM_BASE_LIB=
 
 GPM_PKG=com.google.android.projection.sink
 
@@ -89,25 +94,76 @@ sum_is() {
     return 0
 }
 
-manifest_sum() {
-    local _name="$1"
+# sum_in <md5sum-format file> <name>: the md5 listed for name
+sum_in() {
     local _line
-    _line=$(grep "  $_name\$" "$FILES/MD5SUMS" 2>/dev/null) || return 1
+    _line=$(grep "  $2\$" "$1" 2>/dev/null) || return 1
     set -- $_line
     [ -n "$1" ] || return 1
     echo "$1"
+}
+
+# payload md5 for the current car (use_car first)
+manifest_sum() {
+    sum_in "$FILES/$CAR/MD5SUMS" "$1"
+}
+
+# the supported cars: folders under files/ with a BASE file
+cars() {
+    local _d
+    for _d in "$FILES"/*; do
+        [ -f "$_d/BASE" ] && echo "${_d##*/}"
+    done
+    return 0
+}
+
+use_car() {
+    CAR="$1"
+    SUM_BASE_APK=$(sum_in "$FILES/$CAR/BASE" HKMC_GPM.apk) &&
+    SUM_BASE_ODEX=$(sum_in "$FILES/$CAR/BASE" HKMC_GPM.odex) &&
+    SUM_BASE_LIB=$(sum_in "$FILES/$CAR/BASE" libautoreceiver_infobank.so) || {
+        log "FAIL: $FILES/$CAR/BASE incomplete"
+        return 1
+    }
+    CAR_NAME=$(cat "$FILES/$CAR/NAME" 2>/dev/null)
+    [ -n "$CAR_NAME" ] || CAR_NAME=$CAR
+    return 0
+}
+
+# car_for <apk md5> <odex md5> <lib md5>: the car whose BASE these are
+car_for() {
+    local _c
+    for _c in $(cars); do
+        use_car "$_c" || continue
+        if [ "$1:$2:$3" = "$SUM_BASE_APK:$SUM_BASE_ODEX:$SUM_BASE_LIB" ]; then
+            echo "$_c"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# snapshot_car: the car whose BASE the snapshot holds exactly
+snapshot_car() {
+    car_for "$(file_md5 "$BACKUP_DIR/HKMC_GPM.apk")" \
+            "$(file_md5 "$BACKUP_DIR/HKMC_GPM.odex")" \
+            "$(file_md5 "$BACKUP_DIR/libautoreceiver_infobank.so")"
+}
+
+# any_sum <file in each car folder> <name> <md5>: md5 is listed for some car
+any_sum() {
+    local _c
+    [ -n "$3" ] || return 1
+    for _c in $(cars); do
+        [ "$(sum_in "$FILES/$_c/$1" "$2")" = "$3" ] && return 0
+    done
+    return 1
 }
 
 chown_system() {
     chown 0.0 "$1" 2>/dev/null || chown 0:0 "$1" 2>/dev/null || true
 }
 
-# the snapshot holds exactly Leafia v1.0.5's three files
-snapshot_is_base() {
-    [ "$(file_md5 "$BACKUP_DIR/HKMC_GPM.apk")" = "$SUM_BASE_APK" ] &&
-    [ "$(file_md5 "$BACKUP_DIR/HKMC_GPM.odex")" = "$SUM_BASE_ODEX" ] &&
-    [ "$(file_md5 "$BACKUP_DIR/libautoreceiver_infobank.so")" = "$SUM_BASE_LIB" ]
-}
 
 # NEMESIS 1.15 force-updates an installed package from a USB drive left in at
 # boot, so with the reboot after install a drive left in would reinstall and
@@ -135,9 +191,10 @@ clean_payload() {
     return 0
 }
 
-# build_payloads <Leafia apk> <Leafia lib>: rebuild our payloads into $PAYLOAD.
-# lpatch only writes a result when the source is the exact file the delta was
-# made from; the results must then match files/MD5SUMS.
+# build_payloads <Leafia apk> <Leafia lib>: rebuild the current car's payloads
+# into $PAYLOAD (use_car first). lpatch only writes a result when the source is
+# the exact file the delta was made from; the results must then match the
+# car's MD5SUMS. $PAYLOAD/CAR records the car for postinstall.
 build_payloads() {
     local _n _src
     clean_payload
@@ -148,13 +205,14 @@ build_payloads() {
             *.apk) _src="$1" ;;
             *) _src="$2" ;;
         esac
-        if ! "$FILES/lpatch" delta "$FILES/$_n.lpd" "$_src" "$PAYLOAD/$_n" >> "$LOG" 2>&1; then
+        if ! "$FILES/lpatch" delta "$FILES/$CAR/$_n.lpd" "$_src" "$PAYLOAD/$_n" >> "$LOG" 2>&1; then
             log "FAIL: could not rebuild $_n from $_src"
             return 1
         fi
         sum_is "$PAYLOAD/$_n" "$(manifest_sum "$_n")" || return 1
     done
-    log "rebuilt payloads from $1 and $2"
+    echo "$CAR" > "$PAYLOAD/CAR" || { log "FAIL: write $PAYLOAD/CAR"; return 1; }
+    log "rebuilt $CAR_NAME payloads from $1 and $2"
     return 0
 }
 

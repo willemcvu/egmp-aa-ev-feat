@@ -187,9 +187,15 @@ public final class EvModelSender {
         if (outOk) {
             writeFloatLe(msg, EvModelTemplate.TEMP_OFFSET, outC);
         }
-        float roadA = coldRoadLoadA(outOk ? Math.round(outC)
+        EvVehicle veh = EvVehicle.current();
+        if (veh != sLoggedVehicle) {
+            sLoggedVehicle = veh;
+            Log.i(TAG, "vehicle: " + veh);
+        }
+        float roadA = coldRoadLoadA(veh.roadA, outOk ? Math.round(outC)
                 : Integer.MIN_VALUE);
         writeFloatLe(msg, EvModelTemplate.ROAD_A_OFFSET, roadA);
+        writeFloatLe(msg, EvModelTemplate.ROAD_C_OFFSET, veh.roadC);
         int rc = sSource.sendRawMessage(msg);
         sRoadA = roadA;
         Log.i(TAG, "energy model sent: " + wh + " Wh of " + cap
@@ -200,6 +206,7 @@ public final class EvModelSender {
     }
 
     private static int sTickFailures;
+    private static EvVehicle sLoggedVehicle;
 
     /** Log a caught failure (first few in full, then a count every 100). */
     private static void logTickFailure(Throwable t) {
@@ -214,22 +221,23 @@ public final class EvModelSender {
     // ---- cold road load ------------------------------------------------------
 
     /**
-     * Road load A for the outside temperature: base A plus the cold penalty
+     * Road load A for the outside temperature: the vehicle's warm A
+     * (EvVehicle) plus the cold penalty
      * (EvModelTemplate.COLD_*, linear, clamped). The temperature it is based
      * on only moves once the reading is COLD_HYST_C away, so a value
      * wobbling around an edge doesn't keep changing A (Maps re-routes when A
      * moves by >= 50 N). Unknown temperature keeps the last one used, or the
      * warm base A if there is none yet.
      */
-    private static float coldRoadLoadA(int outC) {
+    static float coldRoadLoadA(float baseA, int outC) {
         if (outC != Integer.MIN_VALUE && (sColdTempC == Integer.MIN_VALUE
                 || Math.abs(outC - sColdTempC) >= COLD_HYST_C)) {
             sColdTempC = outC;
         }
         if (sColdTempC == Integer.MIN_VALUE) {
-            return EvModelTemplate.ROAD_A_N;
+            return baseA;
         }
-        return EvModelTemplate.ROAD_A_N + coldDeltaA(sColdTempC);
+        return baseA + coldDeltaA(sColdTempC);
     }
 
     /** Extra road load (N) at temp C; COLD_TEMPS_C runs warm to cold. */
@@ -477,7 +485,7 @@ public final class EvModelSender {
     }
 
     /**
-     * The generated offsets match the template: placeholders, road A, and
+     * The generated offsets match the template: placeholders, road A and C, and
      * every scaled varint holding its reference value.
      */
     static boolean checkPlaceholders(byte[] template) {
@@ -490,8 +498,11 @@ public final class EvModelSender {
             }
             byte[] aWant = new byte[4];
             writeFloatLe(aWant, 0, EvModelTemplate.ROAD_A_N);
+            byte[] cWant = new byte[4];
+            writeFloatLe(cWant, 0, EvModelTemplate.ROAD_C_N);
             for (int i = 0; i < 4; i++) {
-                if (template[EvModelTemplate.ROAD_A_OFFSET + i] != aWant[i]) {
+                if (template[EvModelTemplate.ROAD_A_OFFSET + i] != aWant[i]
+                        || template[EvModelTemplate.ROAD_C_OFFSET + i] != cWant[i]) {
                     return false;
                 }
             }

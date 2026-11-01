@@ -352,6 +352,14 @@ FILE_EDITS = [
 
 
 def main() -> int:
+    # usage: patch_gpm_smali.py [<Leafia smali tree> <output tree>]
+    # (one car's tree per run; see tools/build_all.sh)
+    global SRC_TREE, BUILD_TREE
+    if len(sys.argv) == 3:
+        SRC_TREE, BUILD_TREE = Path(sys.argv[1]), Path(sys.argv[2])
+    elif len(sys.argv) != 1:
+        print(__doc__)
+        return 2
     if BUILD_TREE.exists():
         shutil.rmtree(BUILD_TREE)
     shutil.copytree(SRC_TREE, BUILD_TREE)
